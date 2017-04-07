@@ -1,6 +1,6 @@
 ![Open Service Broker API](https://www.openservicebrokerapi.org/wp-content/uploads/2016/12/osbapi_logo_concept3_wtm.png)
 
-[The Open Service Broker API specification](spec.md)
+[The Open Service Broker API specification](http://petstore.swagger.io/?url=https://raw.githubusercontent.com/mattmcneeney/servicebroker/swagger/spec.yaml)
 
 [Release Notes for past versions](release-notes.md)
 
