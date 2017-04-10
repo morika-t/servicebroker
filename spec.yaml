@@ -3,15 +3,11 @@ info:
   version: '2.11'
   title: Service Broker API
   description: |
-    The Cloud Foundry services API defines the contract between the Cloud
-    Controller and the service broker. The broker is expected to
-    implement several HTTP (or HTTPS) endpoints underneath a URI prefix.
-    One or more services can be provided by a single broker, and load
-    balancing enables horizontal scalability of redundant brokers.
-    Multiple Cloud Foundry instances can be supported by a single broker
-    using different URL prefixes and credentials. [Learn more about
-    the Service Broker API.](http://docs.cloudfoundry.org/services/api.html)
-
+    The Service Broker API defines an HTTP interface between the services marketplace of a platform and service brokers.
+externalDocs:
+  description: |
+    Further information on this specification.
+  url: 'https://github.com/openservicebrokerapi/servicebroker'
 host: 127.0.0.1:8888
 basePath: /v2
 schemes:
@@ -20,23 +16,24 @@ paths:
   /catalog:
     get:
       operationId: catalog
-      summary: Gets services registered within the broker
+      summary: Fetch the catalog of plans that a service offers.
       tags:
       - catalog
       description: |
-        The first endpoint that a broker must implement is
-        the service catalog. Cloud Controller will initially fetch this
-        endpoint from all brokers and make adjustments to the user-facing
-        service catalog stored in the Cloud Controller database.
+        The first endpoint that a broker must implement is the service catalog.
+        The platform marketplace fetches this endpoint from all brokers in order to present an aggregated user-facing catalog.
+        Warnings for broker authors:
+        * Be cautious removing services and plans from their catalogs, as platform marketplaces may have provisioned service instances of these plans. Consider your deprecation strategy.
+        * Do not change the ids of services and plans. This action is likely to be evaluated by a platform marketplace as a removal of one plan and addition of another. See above warning about removal of plans.
+        Responses with any undefined status codes should be interpreted as an error.
+      headers: '#/definitions/DefaultHeaders'
       produces:
       - application/json
       responses:
         '200':
-          description: successful operation
+          description: Success
           schema:
             $ref: '#/definitions/CatalogServices'
-        '400':
-          description: Invalid status value
   /service_instances/{instance_id}/{last_operation}:
     parameters:
     - $ref: '#/parameters/instance_id'
@@ -189,7 +186,6 @@ paths:
           schema:
             $ref: '#/definitions/Empty'
 parameters:
-  # this is missing!
   last_operation:
     name: last_operation
     in: path
@@ -208,90 +204,92 @@ parameters:
     in: path
     required: true
 definitions:
+  DefaultHeaders:
+    X-Broker-API-Version:
+      description: 2.11
+      type: string
   CatalogServices:
-    description: list of services
+    description: Array of service objects.
     properties:
       services:
         type: array
         items:
           $ref: '#/definitions/Services'
   Services:
-    description: Schema of a service object
+    description: Schema of a service object.
     properties:
       id:
         type: string
-        description: 'An identifier used to correlate this service in future requests to the catalog. This must be unique within Cloud Foundry, using a GUID is recommended.'
+        description: An identifier used to correlate this service in future requests to the broker. This must be globally unique within a platform marketplace. Using a GUID is recommended.
+        required: true
       name:
         type: string
-        description: The CLI-friendly name of the service that will appear in the
-          catalog. All lowercase, no spaces.
+        description: A CLI-friendly name of the service. All lowercase, no spaces. This must be globally unique within a platform marketplace.
+        required: true
       description:
         type: string
-        description: A short description of the service that will appear in the catalog.
+        description: A short description of the service.
+        required: true
+      bindable:
+        type: boolean
+        description: Specifies whether instances of the service can be bound to applications. This specifies the default for all plans of this service. Plans can override this field.
+        required: true
       tags:
         type: array
-        description: 'Tags provide a flexible mechanism to expose a classification, attribute, or base technology of a service, enabling equivalent services to be swapped out without changes to dependent logic in applications, buildpacks, or other services. E.g. mysql, relational, redis, key-value, caching, messaging, amqp.'
+        description: Tags provide a flexible mechanism to expose a classification, attribute, or base technology of a service, enabling equivalent services to be swapped out without changes to dependent logic in applications, buildpacks, or other services. E.g. mysql, relational, redis, key-value, caching, messaging, amqp.
         items:
           type: string
       metadata:
-        $ref: '#/definitions/Meta_data'
-      requires:
-        type: array
-        description: 'A list of permissions that the user would have to give the service, if they provision it. The only permission currently supported is syslog_drain; for more info [see Application Log Streaming](https://docs.cloudfoundry.org/services/app-log-streaming.html).'
-        items:
-          type: string
-      bindable:
-        type: boolean
-        description: Specifies whether instances of the service can be bound to applications.
-          This specifies the default for all plans of this service. Plans can override
-          this field.
+        type: object
+        description: An opaque object of metadata for a service offering. Controller treats this as a blob. Note that there are (conventions)[https://docs.cloudfoundry.org/services/catalog-metadata.html] in existing brokers and controllers for fields that aid in the display of catalog data.
+      dashboard_client:
+        $ref: '#/definitions/DashboardClient'
       plan_updateable:
         type: boolean
         description: Whether the service supports upgrade/downgrade for some plans. Please note that the misspelling of the attribute plan_updatable to plan_updateable was done by mistake. We have opted to keep that misspelling instead of fixing it and thus breaking backward compatibility.
       plans:
         type: array
-        description: A list of plans for this service
+        description: A list of plans for this service.
         items:
           $ref: '#/definitions/Plan'
       dashboard_client:
         $ref: '#/definitions/Dashboard_client'
-  Plan:
-    description: A plan for the service
+  DashboardClient:
+    description: Contains the data necessary to activate the [Dashboard SSO feature](https://docs.cloudfoundry.org/services/dashboard-sso.html) for this service.
     properties:
       id:
         type: string
-        description: An identifier used to correlate this plan in future requests
-          to the catalog. This must be unique within Cloud Foundry, using a GUID is
-          recommended.
-      name:
-        type: string
-        description: The CLI-friendly name of the plan that will appear in the catalog.
-          All lowercase, no spaces.
-      description:
-        type: string
-        description: A short description of the service that will appear in the catalog.
-      metadata:
-        type: object
-        description: A list of metadata for a service plan. For more information, [see Service Metadata](https://docs.cloudfoundry.org/services/catalog-metadata.html).
-      free:
-        type: boolean
-        description: This field allows the plan to be limited by the non_basic_services_allowed field in a Cloud Foundry Quota, [see Quota Plans](http://docs.cloudfoundry.org/running/managing-cf/quota-plans.html).
-      bindable:
-        type: boolean
-        description: Specifies whether instances of the service plan can be bound to applications. This field is optional. If specified, this takes precedence over the bindable attribute of the service. If not specified, the default is derived from the service.
-  Dashboard_client:
-    description: Contains the data necessary to activate the [Dashboard SSO feature](https://docs.cloudfoundry.org/services/dashboard-sso.html)
-      for this service
-    properties:
-      id:
-        type: string
-        description: The id of the Oauth2 client that the service intends to use. The name may be taken, in which case the API will return an error to the operator
+        description: The id of the Oauth client that the dashboard will use.
       secret:
         type: string
         description: A secret for the dashboard client
       redirect_uri:
         type: string
-        description: A domain for the service dashboard that will be whitelisted by the UAA to enable SSO
+        description: A URI for the service dashboard. Validated by the OAuth token server when the dashboard requests a token.
+  Plan:
+    description: A plan offered by a service.
+    properties:
+      id:
+        type: string
+        description: An identifier used to correlate this plan in future requests to the broker. This must be globally unique within a platform marketplace. Using a GUID is recommended.
+        required: true
+      name:
+        type: string
+        description: The CLI-friendly name of the plan. Must be unique within the service. All lowercase, no spaces.
+        required: true
+      description:
+        type: string
+        description: A short description of the plan.
+        required: true
+      metadata:
+        type: object
+        description: An opaque object of metadata for a service offering. Controller treats this as a blob. Note that there are (conventions)[https://docs.cloudfoundry.org/services/catalog-metadata.html] in existing brokers and controllers for fields that aid in the display of catalog data.
+      free:
+        type: boolean
+        description: When false, instances of this plan have a cost. The default is true.
+      bindable:
+        type: boolean
+        description: Specifies whether instances of the service plan can be bound to applications. This field is optional. If specified, this takes precedence over the bindable attribute of the service. If not specified, the default is derived from the service.
   Service:
     description: Service object
     properties:
@@ -378,7 +376,7 @@ definitions:
       syslog_drain_url:
         type: string
         description: A URL to which Cloud Foundry should drain logs for the bound application. requires syslog_drain must be declared in the catalog endpoint or Cloud Foundry will consider the response invalid. For details, [see Application Log Streaming](https://docs.cloudfoundry.org/services/app-log-streaming.html).
-  Meta_data:
+  Metadata:
     description: metadata related to the service
     properties:
       displayName:
