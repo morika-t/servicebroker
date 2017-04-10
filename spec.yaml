@@ -16,7 +16,7 @@ paths:
   /catalog:
     get:
       operationId: catalog
-      summary: Fetch the catalog of plans that a service offers.
+      summary: Fetch the catalog of plans that a service offers. After implementing this endpoint, the service broker must be registered with the platform to make the services and plans available to end users.
       description: |
         The first endpoint that a broker must implement is the service catalog.
         The platform marketplace fetches this endpoint from all brokers in order to present an aggregated user-facing catalog.
@@ -24,7 +24,7 @@ paths:
         * Be cautious removing services and plans from their catalogs, as platform marketplaces may have provisioned service instances of these plans. Consider your deprecation strategy.
         * Do not change the ids of services and plans. This action is likely to be evaluated by a platform marketplace as a removal of one plan and addition of another. See above warning about removal of plans.
         Responses with any undefined status codes should be interpreted as an error.
-      headers: '#/definitions/DefaultHeaders'
+      x-broker-api-version: 2.11
       produces:
       - application/json
       tags:
@@ -45,7 +45,7 @@ paths:
         What provisioning represents varies by service and plan, although there are several common use cases.
         For a MySQL service, provisioning could result in an empty dedicated database server running on its own VM or an empty schema on a shared database server.
         For non-data services, provisioning could just mean an account on an multi-tenant SaaS application.
-      headers: '#/definitions/DefaultHeaders'
+      x-broker-api-version: 2.11
       produces:
       - application/json
       consumes:
@@ -110,7 +110,7 @@ paths:
         To enable support for the update of the plan, a broker should declare support per service by including `plan_updateable: true` in its catalog endpoint.
         Not all permutations of plan changes are expected to be supported. For example, a service may support upgrading from plan "shared small" to "shared large" but not to plan "dedicated".
         It is up to the broker to validate whether a particular permutation of plan change is supported. If a particular plan change is not supported, the broker should return a meaningful error message in response.
-      headers: '#/definitions/DefaultHeaders'
+      x-broker-api-version: 2.11
       consumes:
       - application/json
       produces:
@@ -153,8 +153,10 @@ paths:
     delete:
       operationId: deprovisionServiceInstance
       summary: Deprovisions a service instance.
-      description: Delete a service instance and associated resources.
-      headers: '#/definitions/DefaultHeaders'
+      description: |
+        When a broker receives a deprovision request from the marketplace, it should delete any resources it created during the provision.
+        Usually this means that all resources are immediately reclaimed for future provisions.
+      x-broker-api-version: 2.11
       produces:
       - application/json
       tags:
@@ -191,15 +193,54 @@ paths:
           description: Should be returned if the broker only supports asynchronous deprovisioning for the requested plan and the request did not include `?accepts_incomplete=true`.
           schema:
             $ref: '#/definitions/Error'
+  /service_instances/{instance_id}/last_operation:
+    parameters:
+    - $ref: '#/parameters/instance_id'
+    put:
+      operationId: createServiceInstance
+      summary: Provisions a service instance.
+      description: |
+        When the broker receives a provision request from the platform, it should take whatever action is necessary to create a new resource.
+        What provisioning represents varies by service and plan, although there are several common use cases.
+        For a MySQL service, provisioning could result in an empty dedicated database server running on its own VM or an empty schema on a shared database server.
+        For non-data services, provisioning could just mean an account on an multi-tenant SaaS application.
+      x-broker-api-version: 2.11
+      produces:
+      - application/json
+      consumes:
+      - application/json
+      tags:
+      - service_instances
+      parameters:
+      - name: service_id
+        in: path
+        type: string
+        description: The ID of the servicef rom the catalog. Although this is not required, the platform should include them on all requests.
+      - name: plan_id
+        in: path
+        type: string
+        description: The ID of the plan from the catalog. Although this is not required, the platform should include them on all requests.
+      - name: operation
+        in: path
+        type: string
+        description: A broker-provided identifier for the operation. When a value for `operation` is included with asynchronous responses for provision service, update service and deprovision service requests, the platform should provide the same value using this query parameter.
+      responses:
+        '200':
+          description: Fetched last operation successfully.
+          schema:
+            $ref: '#/definitions/LastOperationResponse'
+        '410':
+          description: Appropriate only for asynchronous delete operations. The platform should consider this response a success and remove the resource from its database. Returning this while the platform is polling for create or update operations should be interpreted as an invalid response and the platform should continue polling.
+          schema:
+            $ref: '#/definitions/Error'
   /service_instances/{instance_id}/service_bindings/{binding_id}:
     parameters:
     - $ref: '#/parameters/instance_id'
     - $ref: '#/parameters/binding_id'
     put:
       operationId: serviceBind
-      x-version: '2.6'
-      summary: Binds to a service
-      description: 'When the broker receives a bind request from the Cloud Controller, it should return information which helps an application to utilize the provisioned resource. This information is generically referred to as credentials. Applications should be issued unique credentials whenever possible, so one application access can be revoked without affecting other bound applications. For more information on credentials, [see Binding Credentials](https://docs.cloudfoundry.org/services/binding-credentials.html).'
+      summary: Reqest generation of a service binding.
+      description: See the external documentation for more information on the types of service bindings.
       produces:
       - application/json
       consumes:
@@ -223,42 +264,54 @@ paths:
         description: Deprecated in favour of `bind_resource.app_guid`. GUID of an application associated with the binding to be created.
       - name: bind_resource
         in: body
-        schema:
-          $ref: '#/definitions/Binding'
+        type: object
+        description: Configuration options for the service binding. An opaque object, controller treats this as a blob.
       responses:
-        '200':
-          description: 'May be returned if the binding already exists and the requested parameters are identical to the existing binding.'
-          schema:
-            $ref: '#/definitions/BindingResponse'
         '201':
           description: Binding has been created.
           schema:
             $ref: '#/definitions/BindingResponse'
-        '409':
-          description: 'Should be returned if the requested binding already exists. The expected response body is {}, though the description field can be used to return a user-facing error message, as described in Broker Errors.'
+        '200':
+          description: May be returned if the binding already exists and the requested parameters are identical to the existing binding.
           schema:
-            $ref: '#/definitions/Empty'
+            $ref: '#/definitions/BindingResponse'
+        '409':
+          description: Should be returned if the requested binding already exists.
+          schema:
+            $ref: '#/definitions/Error'
+        '422':
+          description: Should be returned if the broker requires that `app_guid` be included in the request body.
+          schema:
+            $ref: '#/definitions/Error'
     delete:
       operationId: serviceUnbind
-      summary: Unbinds a service
-      description: 'When a broker receives an unbind request from Cloud Controller, it should delete any resources it created in bind. Usually this means that an application immediately cannot access the resource.'
+      summary: Unbind a service
+      description: |
+        When a broker receives an unbind request from the marketplace, it should delete any resources associated with the binding.
+        In the case where credentials were generated, this may result in requests to the service instance failing to authenticate.
+        Brokers that do not provide any bindable services or plans do not need to implement this endpoint.
       produces:
       - application/json
       tags:
       - service_instances
       parameters:
-      - name: UnbindParameters
+      - name: service_id
         in: body
+        type: string
         required: true
-        schema:
-          $ref: '#/definitions/UnbindParameters'
+        description: ID of the service from the catalog.
+      - name: plan_id
+        in: body
+        type: string
+        required: true
+        description: ID of the plan from the catalog.
       responses:
         '200':
-          description: Binding was deleted. The expected response body is {}.
+          description: Binding was deleted.
           schema:
             $ref: '#/definitions/Empty'
         '410':
-          description: 'Should be returned if the binding does not exist. The expected response body is {}.'
+          description: Should be returned if the binding does not exist.
           schema:
             $ref: '#/definitions/Empty'
 parameters:
@@ -281,10 +334,6 @@ parameters:
     type: string
     required: true
 definitions:
-  DefaultHeaders:
-    X-Broker-API-Version:
-      description: 2.11
-      type: string
   CatalogServices:
     description: Array of service objects.
     properties:
@@ -329,8 +378,6 @@ definitions:
         description: A list of plans for this service.
         items:
           $ref: '#/definitions/Plan'
-      dashboard_client:
-        $ref: '#/definitions/Dashboard_client'
   DashboardClient:
     description: Contains the data necessary to activate the [Dashboard SSO feature](https://docs.cloudfoundry.org/services/dashboard-sso.html) for this service.
     properties:
@@ -375,7 +422,7 @@ definitions:
         description: The URL of a web-based management user interface for the service instance; we refer to this as a service dashboard. The URL should contain enough information for the dashboard to identify the resource being accessed.
       operation:
         type: string
-        description: For asynchronous responses, service brokers may return an identifier representing the operation. The value of this field should be provided by the broker client with requests to the relevant last operation endpoint in a URL encoded query parameter.
+        description: For asynchronous responses, service brokers may return an identifier representing the operation. The value of this field should be provided by the platform with requests to the relevant last operation endpoint in a URL encoded query parameter.
   Empty:
     type: string
     description: Empty response should be an empty object (`{}`).
@@ -403,45 +450,39 @@ definitions:
       value:
         type: object
         description: Value of the parameter.
-  PreviousValues:
-    description: Information about the instance prior to the update.
-    properties:
-      service_id:
-        type: string
-        description: ID of the service for the instance.
-      plan_id:
-        type: string
-        description: ID of the plan prior to the update.
-      organization_id:
-        type: string
-        description: ID of the organization specified for the instance.
-      space_id:
-        type: string
-        description: ID of the space specified for the instance.
   LastOperation:
     description: An operation is in progress.
     properties:
       operation:
         type: string
-        description: For asynchronous responses, service brokers may return an identifier representing the operation. The value of this field should be provided by the broker client with requests to the relevant last operation endpoint in a URL encoded query parameter.
-  Binding:
-    description: A JSON object that contains data for platform resources associated with the binding to be created.
+        description: For asynchronous responses, service brokers may return an identifier representing the operation. The value of this field should be provided by the platform with requests to the relevant last operation endpoint in a URL encoded query parameter.
+  LastOperationResponse:
+    description: Information on the last operation.
     properties:
-      app_guid:
+      state:
         type: string
-        description: GUID of the application that you want to bind your service to. Will be included when users bind applications to service instances.
-      route:
+        description: Valid values are `in progress`, `succeeded` and `failed`. While the state is `in progress`, the platform should continue polling. A state of `succeeded` or `failed` should cause the platform to cease polling.
+        required: true
+      description:
         type: string
-        desceiption: A URI providing access to the service.
+        description: A user-facing message displayed to the platform API client. Can be used to tell the user details about the status of the operation.
   BindingResponse:
-    description: Success binding response.
+    description: A binding has been generated successfully.
     properties:
       credentials:
         type: object
-        description: A free-form hash of credentials that the bound application can use to access the service. For more information, [see Binding Credentials](https://docs.cloudfoundry.org/services/binding-credentials.html).
+        description: A free-form hash of credentials that may be used by applications or users to access the service.
       syslog_drain_url:
         type: string
-        description: A URL to which Cloud Foundry should drain logs for the bound application. requires syslog_drain must be declared in the catalog endpoint or Cloud Foundry will consider the response invalid. For details, [see Application Log Streaming](https://docs.cloudfoundry.org/services/app-log-streaming.html).
+        description: "A URL to which logs may be streamed. `'requires': [ ' syslog_drain ' ]` must be declared in the catalog endpoint or the platform should consider the response invalid."
+      route_service_url:
+        type: string
+        description: "A URL to which the platform may proxy requests for the address sent with `bind_resource.route` in the request body. `'requires': [ 'route_forwarding' ]` must be declared in the catalog endpoint or the platform should consider the response invalid."
+      volume_mounts:
+        type: array
+        description: "An array of configuration for mounting volumes. `'requires': [ 'volume_mount' ]` must be declared in the catalog endpoint or the platform should consider the response invalid."
+        items:
+          type: object
   Metadata:
     description: metadata related to the service
     properties:
