@@ -17,8 +17,6 @@ paths:
     get:
       operationId: catalog
       summary: Fetch the catalog of plans that a service offers.
-      tags:
-      - catalog
       description: |
         The first endpoint that a broker must implement is the service catalog.
         The platform marketplace fetches this endpoint from all brokers in order to present an aggregated user-facing catalog.
@@ -29,59 +27,90 @@ paths:
       headers: '#/definitions/DefaultHeaders'
       produces:
       - application/json
+      tags:
+      - catalog
       responses:
         '200':
           description: Success
           schema:
             $ref: '#/definitions/CatalogServices'
-  /service_instances/{instance_id}/{last_operation}:
+  /service_instances/{instance_id}:
     parameters:
     - $ref: '#/parameters/instance_id'
-    - $ref: '#/parameters/last_operation'
     put:
       operationId: createServiceInstance
-      x-version: '2.11'
+      summary: Provisions a service instance.
+      description: |
+        When the broker receives a provision request from the platform, it should take whatever action is necessary to create a new resource.
+        What provisioning represents varies by service and plan, although there are several common use cases.
+        For a MySQL service, provisioning could result in an empty dedicated database server running on its own VM or an empty schema on a shared database server.
+        For non-data services, provisioning could just mean an account on an multi-tenant SaaS application.
+      headers: '#/definitions/DefaultHeaders'
       produces:
       - application/json
       consumes:
       - application/json
       tags:
       - service_instances
-      description: 'When the broker receives a provision request from Cloud Controller, it should synchronously take whatever action is necessary to create a new service resource for the developer. The result of provisioning varies by service type, although there are a few common actions that work for many services.'
-      summary: Provisions a service instance
       parameters:
-      - name: service
-        required: true
-        description: Service information.
+      - name: service_id
         in: body
-        schema:
-          $ref: '#/definitions/Service'
+        type: string
+        description: The ID of the service (from the catalog). Must be globally unique.
+        required: true
+      - name: plan_id
+        in: body
+        type: string
+        description: The ID of the plan (from the catalog) for which the service instance has been requested. Must be unique to a service.
+        required: true
+      - name: parameters
+        in: body
+        $ref: '#/definitions/ServiceParameters'
+      - name: accepts_incomplete
+        type: boolean
+        description: A value of true indicates that the marketplace and its clients support asynchronous broker operations. If this parameter is not included in the request, and the broker can only provision an instance of the requested plan asynchronously, the broker should reject the request with a 422 as described below.
+      - name: organization_guid
+        in: body
+        type: string
+        description: The platform GUID for the organization under which the service is to be provisioned. Although most brokers will not use this field, it may be helpful for executing operations on a user's behalf.
+        required: true
+      - name: space_guid
+        in: body
+        type: string
+        description: The identifier for the project space within the platform organization. Although most brokers will not use this field, it may be helpful for executing operations on a user's behalf.
+        required: true
       responses:
         '200':
-          description: 'May be returned if the service instance already exists and the requested parameters are identical to the existing service instance. The expected response body is below.'
+          description: May be returned if the service instance already exists and the requested parameters are identical to the existing service instance. The expected response body is below.
           schema:
-            $ref: '#/definitions/OperationState'
+            $ref: '#/definitions/ProvisionResponse'
         '201':
-          description: Service instance has been created.
+          description: Service instance has been provisioned. The expected response body is below.
           schema:
-            $ref: '#/definitions/Dashboard_url'
+            $ref: '#/definitions/ProvisionResponse'
+        '202':
+          description: Service instance provisioning is in progress. This triggers the platform marketplace to poll the relevant last operation endpoint for operation status.
+          schema:
+            $ref: '#/definitions/ProvisionResponse'
         '409':
-          description: 'Should be returned if the requested service instance already exists. The expected response body is {}'
-          schema:
-            $ref: '#/definitions/Empty'
-        '410':
-          description: 'Appropriate only for asynchronous delete operations. The platform should consider this response a success and remove the resource from its database. The expected response body is {}. Returning this while the platform is polling for create or update operations should be interpreted as an invalid response and the platform should continue polling.'
+          description: Should be returned if a service instance with the same id already exists but with different attributes.
           schema:
             $ref: '#/definitions/Empty'
         '422':
-          description: 'Should be returned if the broker only supports asynchronous provisioning for the requested plan and the request did not include ?accepts_incomplete=true. The expected response body is: { error: AsyncRequired, description: This service plan requires client support for asynchronous service operations. }, as described below.'
+          description: Should be returned if the broker only supports asynchronous provisioning for the requested plan and the request did not include `?accepts_incomplete=true`.
           schema:
             $ref: '#/definitions/Error'
     patch:
       operationId: updateServiceInstance
-      x-version: '2.11'
       summary: Updating a Service Instance
-      description: 'Brokers that implement this endpoint can enable users to modify attributes of an existing service instance. The first attribute Cloud Foundry supports users modifying is the service plan. This effectively enables users to upgrade or downgrade their service instance to other plans. To see how users make these requests, [see Managing Services](https://docs.cloudfoundry.org/devguide/services/managing-services.html#update_service).'
+      description: |
+        By implementing this endpoint, service broker authors can enable users to modify two attributes of an existing service instance: the service plan and parameters.
+        By changing the service plan, users can upgrade or downgrade their service instance to other plans.
+        By modifying properties, users can change configuration options that are specific to a service or plan.
+        To enable support for the update of the plan, a broker should declare support per service by including `plan_updateable: true` in its catalog endpoint.
+        Not all permutations of plan changes are expected to be supported. For example, a service may support upgrading from plan "shared small" to "shared large" but not to plan "dedicated".
+        It is up to the broker to validate whether a particular permutation of plan change is supported. If a particular plan change is not supported, the broker should return a meaningful error message in response.
+      headers: '#/definitions/DefaultHeaders'
       consumes:
       - application/json
       produces:
@@ -89,45 +118,79 @@ paths:
       tags:
       - service_instances
       parameters:
-      - name: plan
-        description: New Plan information.
-        required: true
+      - name: service_id
         in: body
-        schema:
-          $ref: '#/definitions/ServicePlan'
+        type: string
+        description: The ID of the service (from the catalog). Must be globally unique.
+        required: true
+      - name: plan_id
+        in: body
+        type: string
+        description: The ID of the plan (from the catalog) for which the service instance has been requested. Must be unique to a service.
+      - name: parameters
+        in: body
+        $ref: '#/definitions/ServiceParameters'
+      - name: accepts_incomplete
+        in: body
+        type: boolean
+        description: A value of true indicates that the marketplace and its clients support asynchronous broker operations. If this parameter is not included in the request, and the broker can only provision an instance of the requested plan asynchronously, the broker should reject the request with a 422 as described below.
+      - name: previous_values
+        in: body
+        $ref: '#/definitions/PreviousValues'
       responses:
         '200':
-          description: New plan is effective. The expected response body is {}.
+          description: The requests changes have been applied.
           schema:
             $ref: '#/definitions/Empty'
-        '422':
-          description: 'May be returned if the particular plan change requested is not supported or if the request can not currently be fulfilled due to the state of the instance (eg. instance utilization is over the quota of the requested plan). Broker should include a user-facing message in the body; for details [see Broker Errors](https://docs.cloudfoundry.org/services/api.html#broker-errors).'
+        '202':
+          description: Service instance update is in progress. This triggers the platform marketplace to poll the relevant last operation endpoint for operation status.
           schema:
-            type: object
+            $ref: '#/definitions/LastOperation'
+        '422':
+          description: May be returned if the requested change is not supported or if the request cannot currently be fulfilled due to the state of the instance (e.g. instance utilization is over the quota of the requested plan). Broker should include a user-facing message in the body. Additionally, a 422 can also be returned if the broker only supports asynchronous update for the requested plan and the request did not include `?accepts_incomplete=true`.
+          schema:
+            $ref: '#/definitions/Error'
     delete:
       operationId: deprovisionServiceInstance
       summary: Deprovisions a service instance.
-      description: 'When a broker receives a deprovision request from Cloud Controller, it should delete any resources it created during the provision. Usually this means that all resources are immediately reclaimed for future provisions.'
+      description: Delete a service instance and associated resources.
+      headers: '#/definitions/DefaultHeaders'
       produces:
       - application/json
       tags:
       - service_instances
       parameters:
-      - name: deprovisionParameters
-        required: true
+      - name: service_id
         in: body
-        description: Parameters to identify the service to be deprovisioned
-        schema:
-          $ref: '#/definitions/UnbindParameters'
+        type: string
+        required: true
+        description: ID of the service from the catalog.
+      - name: plan_id
+        in: body
+        type: string
+        required: true
+        description: ID of the plan from the catalog.
+      - name: accepts_incomplete
+        in: body
+        type: boolean
+        description: A value of true indicates that the marketplace and its clients support asynchronous broker operations. If this parameter is not included in the request, and the broker can only provision an instance of the requested plan asynchronously, the broker should reject the request with a 422 as described below.
       responses:
         '200':
-          description: Service instance was deleted. The expected response body is {}.
+          description: Service instance was deleted.
           schema:
             $ref: '#/definitions/Empty'
+        '202':
+          description: Service instance deletion is in progress. This triggers the marketplace to poll the relevant last operation endpoint for operation status.
+          schema:
+            $ref: '#/definitions/LastOperation'
         '410':
-          description: 'Should be returned if the binding does not exist. The expected response body is {}.'
+          description: Should be returned if the service instance does not exist.
           schema:
             $ref: '#/definitions/Empty'
+        '422':
+          description: Should be returned if the broker only supports asynchronous deprovisioning for the requested plan and the request did not include `?accepts_incomplete=true`.
+          schema:
+            $ref: '#/definitions/Error'
   /service_instances/{instance_id}/service_bindings/{binding_id}:
     parameters:
     - $ref: '#/parameters/instance_id'
@@ -144,8 +207,21 @@ paths:
       tags:
       - service_instances
       parameters:
-      - name: binding
+      - name: service_id
+        in: body
+        type: string
         required: true
+        description: ID of the service from the catalog.
+      - name: plan_id
+        in: body
+        type: string
+        required: true
+        description: ID of the plan from the catalog.
+      - name: app_guid
+        in: body
+        type: string
+        description: Deprecated in favour of `bind_resource.app_guid`. GUID of an application associated with the binding to be created.
+      - name: bind_resource
         in: body
         schema:
           $ref: '#/definitions/Binding'
@@ -186,22 +262,23 @@ paths:
           schema:
             $ref: '#/definitions/Empty'
 parameters:
+  instance_id:
+    name: instance_id
+    in: path
+    description: The `instance_id` of a service instance is provided by the platform. This ID will be used for future requests (bind and deprovision), so the broker must use it to correlate the resource it creates.
+    type: string
+    required: true
   last_operation:
     name: last_operation
     in: path
+    description: The ID of a previous operation.
     required: true
     type: string
-  instance_id:
-    name: instance_id
-    description: 'The instance_id of a service instance is provided by the Cloud Controller. This ID will be used for future requests (bind and deprovision), so the broker must use it to correlate the resource it creates.'
-    type: string
-    in: path
-    required: true
   binding_id:
     name: binding_id
-    description: The binding_id of a service binding is provided by the Cloud Controller.
-    type: string
     in: path
+    description: The binding_id of a service binding is provided by the platform. This ID will be used for future unbind requests, so the broker must use it to correlate the resource it creates.
+    type: string
     required: true
 definitions:
   DefaultHeaders:
@@ -290,45 +367,18 @@ definitions:
       bindable:
         type: boolean
         description: Specifies whether instances of the service plan can be bound to applications. This field is optional. If specified, this takes precedence over the bindable attribute of the service. If not specified, the default is derived from the service.
-  Service:
-    description: Service object
-    properties:
-      service_id:
-        type: string
-        description: The ID of the service within the catalog above. While not strictly necessary, some brokers might make use of this ID.
-      plan_id:
-        type: string
-        description: The ID of the plan within the above service (from the catalog endpoint) that the user would like provisioned. Because plans have identifiers unique to a broker, this is enough information to determine what to provision.
-      organization_guid:
-        type: string
-        description: The Cloud Controller GUID of the organization under which the service is to be provisioned. Although most brokers will not use this field, it could be helpful in determining data placement or applying custom business rules.
-      space_guid:
-        type: string
-        description: Similar to organization_guid, but for the space.
-      parameteres:
-        $ref: '#/definitions/Parameter'
-      accepts_incomplete:
-        type: boolean
-        description: A value of true indicates that the marketplace and its clients support asynchronous broker operations. If this parameter is not included in the request, and the broker can only provision an instance of the requested plan asynchronously, the broker should reject the request with a 422 as described below.
-  Dashboard_url:
-    description: The URL of a web-based management user interface for the service instance; we refer to this as a service dashboard. The URL should contain enough information for the dashboard to identify the resource being accessed (in the example below). For information on how users can authenticate with service dashboards via SSO, [see Dashboard Single Sign-On](https://docs.cloudfoundry.org/services/dashboard-sso.html).
+  ProvisionResponse:
+    description: A provision request has been received.
     properties:
       dashboard_url:
         type: string
-        description: The URL of a web-based management user interface for the service instance; we refer to this as a service dashboard. The URL should contain enough information for the dashboard to identify the resource being accessed (in the example below). For information on how users can authenticate with service dashboards via SSO, [see Dashboard Single Sign-On](https://docs.cloudfoundry.org/services/dashboard-sso.html).
+        description: The URL of a web-based management user interface for the service instance; we refer to this as a service dashboard. The URL should contain enough information for the dashboard to identify the resource being accessed.
+      operation:
+        type: string
+        description: For asynchronous responses, service brokers may return an identifier representing the operation. The value of this field should be provided by the broker client with requests to the relevant last operation endpoint in a URL encoded query parameter.
   Empty:
     type: string
-    description: Expected empty response could be {}
-  ServicePlan:
-    description: New Plan to be added to a service.
-    properties:
-      plan_id:
-        type: string
-        description: ID of the new plan from the catalog.
-      parameters:
-        $ref: '#/definitions/Parameter'
-      previous_values:
-        $ref: '#/definitions/PreviousValues'
+    description: Empty response should be an empty object (`{}`).
   PreviousValues:
     description: Information about the instance prior to the update.
     properties:
@@ -344,29 +394,45 @@ definitions:
       space_id:
         type: string
         description: ID of the space containing the instance.
-  Parameter:
-    description: A key value parameters
+  ServiceParameters:
+    description: Configuration options for the service instance. Controller treats this as a blob. Note that there are (conventions)[https://docs.cloudfoundry.org/services/catalog-metadata.html] in existing brokers and controllers for fields that aid in the display of catalog data.
     properties:
       name:
         type: string
-        description: Name of the parameter
+        description: Name of the parameter.
       value:
         type: object
-        description: value of the parameter
+        description: Value of the parameter.
+  PreviousValues:
+    description: Information about the instance prior to the update.
+    properties:
+      service_id:
+        type: string
+        description: ID of the service for the instance.
+      plan_id:
+        type: string
+        description: ID of the plan prior to the update.
+      organization_id:
+        type: string
+        description: ID of the organization specified for the instance.
+      space_id:
+        type: string
+        description: ID of the space specified for the instance.
+  LastOperation:
+    description: An operation is in progress.
+    properties:
+      operation:
+        type: string
+        description: For asynchronous responses, service brokers may return an identifier representing the operation. The value of this field should be provided by the broker client with requests to the relevant last operation endpoint in a URL encoded query parameter.
   Binding:
-    description: Information to bind the service to an application.
+    description: A JSON object that contains data for platform resources associated with the binding to be created.
     properties:
       app_guid:
         type: string
         description: GUID of the application that you want to bind your service to. Will be included when users bind applications to service instances.
-      plan_id:
+      route:
         type: string
-        description: ID of the plan from the catalog. While not strictly necessary, some brokers might make use of this ID.
-      service_id:
-        type: string
-        description: ID of the service from the catalog. While not strictly necessary, some brokers might make use of this ID.
-      parameters:
-        $ref: '#/definitions/Parameter'
+        desceiption: A URI providing access to the service.
   BindingResponse:
     description: Success binding response.
     properties:
@@ -405,14 +471,14 @@ definitions:
         type: string
         description: Provider Name
   Error:
-    description: Error processing asynchronous operations
+    description: An error has occurred.
     properties:
       error:
         type: string
-        description: the error name
+        description: The name of the error.
       description:
         type: string
-        description: the description of the error
+        description: The description of the error.
   UnbindParameters:
     description: Parameters needed to unbind a service instance
     properties:
@@ -422,14 +488,3 @@ definitions:
       plan_id:
         type: string
         description: ID of the plan from the catalog. While not strictly necessary, some brokers might make use of this ID.
-  OperationState:
-    description: Response for the current state of an operation
-    properties:
-      state:
-        type: string
-        description: 'Valid values are in progress, succeeded, and failed. While state:
-          in progress, the platform should continue polling. A response with state:
-          succeeded or state: failed should cause the platform to cease polling.'
-      description:
-        type: string
-        description: Optional field. A user-facing message displayed to the platform API client. Can be used to tell the user details about the status of the operation.

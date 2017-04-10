@@ -164,189 +164,39 @@ For success responses, the following fields are valid.
 
 The frequency and maximum duration of polling may vary by platform client. If a platform has a max polling duration and this limit is reached, the platform will cease polling and the operation state will be considered `failed`.
 
-## Provisioning
+## Broker Errors
 
-When the broker receives a provision request from the platform, it should take whatever action is necessary to create a new resource. What provisioning represents varies by service and plan, although there are several common use cases. For a MySQL service, provisioning could result in an empty dedicated database server running on its own VM or an empty schema on a shared database server. For non-data services, provisioning could just mean an account on an multi-tenant SaaS application.
+Broker failures beyond the scope of the well-defined HTTP response codes defined in the specification should return an appropriate HTTP response code (chosen to accurately reflect the nature of the failure) and a body containing a valid JSON Object, possibly including a `description` field (string) containing a meaningful error message explaining why the request failed.
 
-### Request ###
+## Orphans
 
-##### Route #####
-`PUT /v2/service_instances/:instance_id`
+The platform marketplace is the source of truth for service instances and bindings. Service brokers are expected to have successfully provisioned all the instances and bindings that the marketplace knows about, and none that it doesn't.
 
-The `:instance_id` of a service instance is provided by the platform. This ID will be used for future requests (bind and deprovision), so the broker must use it to correlate the resource it creates.
+Orphans can result if the broker does not return a response before a request from the marketplace times out (typically 60 seconds). For example, if a broker does not return a response to a provision request before the request times out, the broker might eventually succeed in provisioning an instance after the marketplace considers the request a failure. This results in an orphan instance on the broker's side.
 
-##### Body #####
-| Request field  | Type  |  Description |
+To mitigate orphan instances and bindings, the marketplace should attempt to delete resources it cannot be sure were successfully created, and should keep trying to delete them until the broker responds with a success.
+
+Platforms should initiate orphan mitigation in the following scenarios:
+
+| Status code of broker response | Platform interpretation of response | Platform initiates orphan mitigation? |
 |---|---|---|
-| service_id*  | string  | The ID of the service (from the catalog). Must be globally unique.  |
-| plan_id*  | string  | The ID of the plan (from the catalog) for which the service instance has been requested. Must be unique to a service.  |
-|  parameters |  JSON object | Configuration options for the service instance. Controller treats this as a blob. Note that there are (conventions)[https://docs.cloudfoundry.org/services/catalog-metadata.html] in existing brokers and controllers for fields that aid in the display of catalog data. |
-|  accepts_incomplete | boolean  | A value of true indicates that the marketplace and its clients support asynchronous broker operations. If this parameter is not included in the request, and the broker can only provision an instance of the requested plan asynchronously, the broker should reject the request with a 422 as described below.  |
-| organization_guid*  | string  | The platform GUID for the organization under which the service is to be provisioned. Although most brokers will not use this field, it may be helpful for executing operations on a user's behalf.  |
-|  space_guid* |  string |  The identifier for the project space within the platform organization. Although most brokers will not use this field, it may be helpful for executing operations on a user's behalf. |
+| 200 | Success | No |
+| 200 with malformed response |  Failure | No |
+| 201 | Success | No |
+| 201 with malformed response | Failure | Yes |
+| All other 2xx | Failure | Yes |
+| 408 | Failure due to timeout | Yes |
+| All other 4xx | Broker rejected request | No |
+| 5xx | Broker error | Yes |
+| Timeout | Failure | Yes |
 
-\* Fields with an asterisk are required.
-
-<pre class="terminal">
-{
-  "service_id": "service-guid-here",
-  "plan_id": "plan-guid-here",
-  "organization_guid": "org-guid-here",
-  "space_guid": "space-guid-here",
-  "parameters": {
-    "parameter1": 1,
-    "parameter2": "foo"
-  }
-}
-</pre>
-
-##### cURL #####
-<pre class="terminal">
-$ curl http://username:password@broker-url/v2/service_instances/:instance_id -d '{
-  "service_id": "service-guid-here",
-  "plan_id": "plan-guid-here",
-  "organization_guid": "org-guid-here",
-  "space_guid": "space-guid-here",
-  "parameters": {
-    "parameter1": 1,
-    "parameter2": "foo"
-  }
-}' -X PUT -H "X-Broker-API-Version: 2.11" -H "Content-Type: application/json"
-</pre>
-
-### Response ###
-
-| Status Code  | Description  |
-|---|---|
-| 201 Created  | Service instance has been provisioned. The expected response body is below.  |
-| 200 OK  |  May be returned if the service instance already exists and the requested parameters are identical to the existing service instance. The expected response body is below. |
-| 202 Accepted  | Service instance provisioning is in progress. This triggers the platform marketplace to poll the [Service Instance Last Operation Endpoint](#polling) for operation status.  |
-| 409 Conflict  | Should be returned if a service instance with the same id already exists but with different attributes. The expected response body is <code>{}</code>.  |
-| 422 Unprocessable Entity  | Should be returned if the broker only supports asynchronous provisioning for the requested plan and the request did not include <code>?accepts_incomplete=true</code>. The expected response body is: <code>{ "error": "AsyncRequired", "description": "This service plan requires client support for asynchronous service operations." }</code>, as described below.  |
-
-
-Responses with any other status code will be interpreted as a failure. Brokers can include a user-facing message in the `description` field; for details see [Broker Errors](#broker-errors).
-
-##### Body #####
-
-All response bodies must be a valid JSON Object (`{}`). This is for future compatibility; it will be easier to add fields in the future if JSON is expected rather than to support the cases when a JSON body may or may not be returned.
-
-For success responses, a broker may return the following fields. For error responses, see [Broker Errors](#broker-errors).
-
-| Response field  |  Type | Description  |
-|---|---|---|
-|  dashboard_url | string  |  The URL of a web-based management user interface for the service instance; we refer to this as a service dashboard. The URL should contain enough information for the dashboard to identify the resource being accessed (<code>9189kdfsk0vfnku</code> in the example below). |
-|  operation |  string | For asynchronous responses, service brokers may return an identifier representing the operation. The value of this field should be provided by the broker client with requests to the [Last Operation](#polling) endpoint in a URL encoded query parameter.  |
-
-\* Fields with an asterisk are required.
-
-<pre class="terminal">
-{
- "dashboard\_url": "<span>http</span>://example-dashboard.example.com/9189kdfsk0vfnku",
- "operation": "task\_10"
-}
-</pre>
-
-## Updating a Service Instance
-
-By implementing this endpoint, service broker authors can enable users to modify two attributes of an existing service instance: the service plan and parameters. By changing the service plan, users can upgrade or downgrade their service instance to other plans. By modifying properties, users can change configuration options that are specific to a service or plan.
-
-To enable support for the update of the plan, a broker should declare support per service by including `plan_updateable: true` in its [catalog endpoint](#catalog-mgmt).
-
-Not all permutations of plan changes are expected to be supported. For example, a service may support upgrading from plan "shared small" to "shared large" but not to plan "dedicated". It is up to the broker to validate whether a particular permutation of plan change is supported. If a particular plan change is not supported, the broker should return a meaningful error message in response.
-
-### Request ###
-
-##### Route #####
-`PATCH /v2/service_instances/:instance_id`
-
-`:instance_id` is the global unique ID of a previously-provisioned service instance.
-
-##### Body #####
-
-| Request Field  | Type  |  Description |
-|---|---|---|
-| service\_id*  | string  | The ID of the service (from the catalog). Must be globally unique.  |
-| plan\_id  | string  | The ID of the plan (from the catalog) for which the service instance has been requested. Must be unique to a service.  |
-| parameters  | JSON object  | Configuration options for the service instance. An opaque object, controller treats this as a blob. |
-| accepts\_incomplete  |  boolean | A value of true indicates that the marketplace and its clients support asynchronous broker operations. If this parameter is not included in the request, and the broker can only provision an instance of the requested plan asynchronously, the broker should reject the request with a 422 as described below.  |
-| previous\_values  | object  |  Information about the instance prior to the update. |
-| previous\_values.service_id  | string  | ID of the service for the instance.  |
-| previous\_values.plan_id  |  string | ID of the plan prior to the update.  |
-| previous\_values.organization_id  | string  | ID of the organization specified for the instance.  |
-| previous\_values.space_id  | string  | ID of the space specified for the instance.  |
-
-\* Fields with an asterisk are required.
-
-<pre class="terminal">
-{
-  "service_id": "service-guid-here",
-  "plan_id": "plan-guid-here",
-  "parameters": {
-    "parameter1": 1,
-    "parameter2": "foo"
-  },
-  "previous_values": {
-    "plan_id": "old-plan-guid-here",
-    "service_id": "service-guid-here",
-    "organization_id": "org-guid-here",
-    "space_id": "space-guid-here"
-  }
-}
-</pre>
-
-##### cURL #####
-<pre class="terminal">
-$ curl http://username:password@broker-url/v2/service_instances/:instance_id -d '{
-  "service_id": "service-guid-here",
-  "plan_id": "plan-guid-here",
-  "parameters": {
-    "parameter1": 1,
-    "parameter2": "foo"
-  },
-  "previous_values": {
-    "plan_id": "old-plan-guid-here",
-    "service_id": "service-guid-here",
-    "organization_id": "org-guid-here",
-    "space_id": "space-guid-here"
-  }
-}' -X PATCH -H "X-Broker-API-Version: 2.11" -H "Content-Type: application/json"
-</pre>
-
-### Response ###
-
-| Status Code  | Description  |
-|---|---|
-| 200 OK  | The requests changes have been applied. The expected response body is <code>{}</code>.  |
-| 202 Accepted  |  Service instance update is in progress. This triggers the platform marketplace to poll the [Service Instance Last Operation Endpoint](#polling) for operation status. |
-| 422 Unprocessable entity  | May be returned if the requested change is not supported or if the request cannot currently be fulfilled due to the state of the instance (e.g. instance utilization is over the quota of the requested plan). Broker should include a user-facing message in the body; for details see [Broker Errors](#broker-errors).  Additionally, a 422 can also be returned if the broker only supports asynchronous update for the requested plan and the request did not include <code>?accepts_incomplete=true</code>; in this case the expected response body is: <code>{ "error": "AsyncRequired", "description": "This service plan requires client support for asynchronous service operations." }</code>  |
-
-Responses with any other status code will be interpreted as a failure. Brokers can include a user-facing message in the `description` field; for details see [Broker Errors](#broker-errors).
-
-##### Body #####
-
-All response bodies must be a valid JSON Object (`{}`). This is for future compatibility; it will be easier to add fields in the future if JSON is expected rather than to support the cases when a JSON body may or may not be returned.
-
-For success responses, a broker may return the following field. Others will be ignored. For error responses, see [Broker Errors](#broker-errors).
-
-| Response field  | Type  | Description  |
-|---|---|---|
-| operation  | string  |  For asynchronous responses, service brokers may return an identifier representing the operation. The value of this field should be provided by the broker client with requests to the [Last Operation](#polling) endpoint in a URL encoded query parameter. |
-
-\* Fields with an asterisk are required.
-
-<pre class="terminal">
-{
- "operation": "task_10"
-}
-</pre>
-
+If the platform marketplace encounters an internal error provisioning an instance or binding (for example, saving to the database fails), then it should at least send a single delete or unbind request to the service broker to prevent creation of an orphan.
 
 ## Binding
 
-If `bindable:true` is declared for a service or plan in the [Catalog](#catalog-mgmt) endpoint, broker clients may request generation of a service binding.
+If `bindable:true` is declared for a service or plan in the cataolog endpoint, broker clients may request generation of a service binding.
 
-<p class="note"><strong>Note</strong>: Not all services must be bindable --- some deliver value just from being provisioned. Brokers that offer services that are bindable should declare them as such using <code>bindable: true</code> in the <a href="#catalog-mgmt">Catalog</a>. Brokers that do not offer any bindable services do not need to implement the endpoint for bind requests.</p>
+**Note**: Not all services must be bindable. Some deliver value just from being provisioned. Brokers that offer services that are bindable should declare them as such using `bindable: true` in the Catalog. Brokers that do not offer any bindable services do not need to implement the endpoint for bind requests.
 
 ### Types of Binding
 
@@ -358,7 +208,7 @@ Credentials are a set of information used by an application or a user to utilize
 
 There are a class of service offerings that provide aggregation, indexing, and analysis of log data. To utilize these services an application that generates logs needs information for the location to which it should stream logs. If a broker represents one of these services, it may optionally return a `syslog_drain_url` in the response for a request to create a service binding, to which logs may be streamed.
 
-The `requires` field in the [Catalog](#catalog-mgmt) endpoint enables a platform marketplace to validate a response for create binding that includes a `syslog_drain_url`. Platform marketplaces should consider a broker's response invalid if it includes a `syslog_drain_url` and `"requires":["syslog_drain"]` is not present in the [Catalog](#catalog-mgmt) endpoint.
+The `requires` field in the catalog endpoint enables a platform marketplace to validate a response for create binding that includes a `syslog_drain_url`. Platform marketplaces should consider a broker's response invalid if it includes a `syslog_drain_url` and `"requires":["syslog_drain"]` is not present in the catalog endpoint.
 
 #### Route Services
 
@@ -366,13 +216,16 @@ There are a class of service offerings that intermediate requests to application
 
 Some platforms may support proxying of application requests to service instances. In this case the platform needs to know where to send application requests; to facilitate this, the broker may return a `route_service_url` in the response for a request to create a binding. Not all services of this type expect to receive requests proxied by the platform; some services will have been configured out-of-band to intermediate requests to applications. In this case, the broker will not return `route_service_url` in response to the create binding request. By sending `bind-resource` as described above, the platform enables dynamic configuration of a service instance already in the application request path for the route, requiring no change in the platform routing tier.
 
-The `requires` field in the [Catalog](#catalog-mgmt) endpoint enables a platform marketplace to validate requests to create bindings. A platform may opt to reject requests to create bindings when a broker has declared `"requires":["route_forwarding"]` for a service in the catalog endpoint.
+The `requires` field in the catalog endpoint enables a platform marketplace to validate requests to create bindings. A platform may opt to reject requests to create bindings when a broker has declared `"requires":["route_forwarding"]` for a service in the catalog endpoint.
 
 #### Volume Services ####
 
 There are a class of services that provide network storage to applications via volume mounts in the application container. A service broker may return data required for this configuration with `volume_mount` in response to the request to create a binding.
 
-The `requires` field in the [Catalog](#catalog-mgmt) endpoint enables a platform marketplace to validate a response for create binding that includes a `volume_mounts`. Platform marketplaces should consider a broker's response invalid if it includes a `volume_mounts` and `"requires":["volume_mount"]` is not present in the [Catalog](#catalog-mgmt) endpoint.
+The `requires` field in the catalog endpoint enables a platform marketplace to validate a response for create binding that includes a `volume_mounts`. Platform marketplaces should consider a broker's response invalid if it includes a `volume_mounts` and `"requires":["volume_mount"]` is not present in the catalog endpoint.
+
+
+----
 
 ### Request ###
 
@@ -513,105 +366,3 @@ delete any resources it created during the provision.
 Usually this means that all resources are immediately reclaimed for future
 provisions.
 
-### Request ###
-
-##### Route #####
-`DELETE /v2/service_instances/:instance_id`
-
-`:instance_id` is the identifier of a previously provisioned instance.
-
-##### Parameters #####
-
-The request provides these query string parameters as useful hints for brokers.
-
-| Query-String Field | Type | Description |
-|---|---|---|
-| service_id* | string | ID of the service from the catalog. |
-| plan_id* | string | ID of the plan from the catalog. |
-| accepts_incomplete  | boolean | A value of true indicates that both the marketplace and the requesting client support asynchronous deprovisioning. If this parameter is not included in the request, and the broker can only deprovision an instance of the requested plan asynchronously, the broker should reject the request with a 422 as described below. |
-
-\* Query parameters with an asterisk are required.
-
-##### cURL #####
-<pre class="terminal">
-$ curl 'http://username:password@broker-url/v2/service_instances/:instance_id?service_id=
-    service-id-here&plan_id=plan-id-here' -X DELETE -H "X-Broker-API-Version: 2.11"
-</pre>
-
-### Response ###
-
-| Status Code | Description |
-|---|---|
-| 200 OK | Service instance was deleted. The expected response body is <code>{}</code>. |
-| 202 Accepted | Service instance deletion is in progress. This triggers the marketplace to poll the [Service Instance Last Operation Endpoint](#polling) for operation status.  |
-| 410 Gone | Should be returned if the service instance does not exist. The expected response body is <code>{}</code>.  |
-| 422 Unprocessable Entity | Should be returned if the broker only supports asynchronous deprovisioning for the requested plan and the request did not include <code>?accepts_incomplete=true</code>. The expected response body is: <code>{ "error": "AsyncRequired", "description": "This service plan requires client support for asynchronous service operations." }</code>, as described below.  |
-
-Responses with any other status code will be interpreted as a failure and the service instance will remain in the marketplace database. Brokers can include a user-facing message in the `description` field; for details see [Broker Errors](#broker-errors).
-
-##### Body #####
-
-All response bodies must be a valid JSON Object (`{}`). This is for future compatibility; it will be easier to add fields in the future if JSON is expected rather than to support the cases when a JSON body may or may not be returned.
-
-For success responses, the following fields are supported. Others will be ignored. For error responses, see [Broker Errors](#broker-errors).
-
-
-|  Response field | Type | Description |
-|---|---|---|
-| operation  | string  | For asynchronous responses, service brokers may return an identifier representing the operation. The value of this field should be provided by the broker client with requests to the [Last Operation](#polling) endpoint in a URL encoded query parameter. |
-
-\* Fields with an asterisk are required.
-
-<pre class="terminal">
-{
- "operation": "task_10"
-}
-</pre>
-
-## Broker Errors
-
-### Response ###
-
-Broker failures beyond the scope of the well-defined HTTP response codes listed
-above (like 410 on delete) should return an appropriate HTTP response code
-(chosen to accurately reflect the nature of the failure) and a body containing a valid JSON Object (not an array).
-
-##### Body #####
-
-All response bodies must be a valid JSON Object (`{}`). This is for future compatibility; it will be easier to add fields in the future if JSON is expected rather than to support the cases when a JSON body may or may not be returned.
-
-For error responses, the following fields are valid. Others will be ignored. If an empty JSON object is returned in the body `{}`, a generic message containing the HTTP response code returned by the broker will be displayed to the requester.
-
-| Response Field | Type | Description |
-|---|---|---|
-| description | string |  A meaningful error message explaining why the request failed. |
-
-<pre class="terminal">
-{
-  "description": "Your account has exceeded its quota for service instances. Please contact support at http://support.example.com."
-}
-</pre>
-
-## Orphans
-
-The platform marketplace is the source of truth for service instances and bindings. Service brokers are expected to have successfully provisioned all the instances and bindings that the marketplace knows about, and none that it doesn't.
-
-Orphans can result if the broker does not return a response before a request from the marketplace times out (typically 60 seconds). For example, if a broker does not return a response to a provision request before the request times out, the broker might eventually succeed in provisioning an instance after the marketplace considers the request a failure. This results in an orphan instance on the broker's side.
-
-To mitigate orphan instances and bindings, the marketplace should attempt to delete resources it cannot be sure were successfully created, and should keep trying to delete them until the broker responds with a success.
-
-Platforms should initiate orphan mitigation in the following scenarios:
-
-| Status code of broker response | Platform interpretation of response | Platform initiates orphan mitigation? |
-|---|---|---|
-| 200 | Success | No |
-| 200 with malformed response |  Failure | No |
-| 201 | Success | No |
-| 201 with malformed response | Failure | Yes |
-| All other 2xx | Failure | Yes |
-| 408 | Failure due to timeout | Yes |
-| All other 4xx | Broker rejected request | No |
-| 5xx | Broker error | Yes |
-| Timeout | Failure | Yes |
-
-If the platform marketplace encounters an internal error provisioning an instance or binding (for example, saving to the database fails), then it should at least send a single delete or unbind request to the service broker to prevent creation of an orphan.
