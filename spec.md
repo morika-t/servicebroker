@@ -11,7 +11,7 @@
   - [URL Properties](#url-properties)
   - [Originating Identity](#originating-identity)
   - [Catalog Management](#catalog-management)
-    - [Adding a Service Broker to the Platform](#adding-a-service-broker-to-the-platform)
+    - [Adding a Service Broker to the Platform](#adding-a-service-broker-to-the-Platform)
   - [Synchronous and Asynchronous Operations](#synchronous-and-asynchronous-operations)
     - [Synchronous Operations](#synchronous-operations)
     - [Asynchronous Operations](#asynchronous-operations)
