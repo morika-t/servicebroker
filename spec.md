@@ -1428,8 +1428,8 @@ $ curl 'http://username:password@broker-url/v2/service_instances/:instance_id' -
 | 404 Not Found | MUST be returned if the Service Instance does not exist or if a provisioning operation is still in progress. The expected response body is `{}`. |
 
 Responses with any other status code will be interpreted as a failure.
-Brokers can include a user-facing message in the `description` field; for
-details see [Broker Errors](#service-broker-errors).
+Service Brokers can include a user-facing message in the `description` field;
+for details see [Broker Errors](#service-broker-errors).
 
 ##### Body
 
@@ -1479,8 +1479,8 @@ $ curl 'http://username:password@broker-url/v2/service_instances/:instance_id/se
 | 404 Not Found | MUST be returned if the Service Binding does not exist or if a binding operation is still in progress. The expected response body is `{}`. |
 
 Responses with any other status code will be interpreted as a failure database.
-Brokers can include a user-facing message in the `description` field; for
-details see [Broker Errors](#service-broker-errors).
+Service Brokers can include a user-facing message in the `description` field;
+for details see [Broker Errors](#service-broker-errors).
 
 ##### Body
 
