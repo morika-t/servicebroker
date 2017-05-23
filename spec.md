@@ -21,6 +21,8 @@
     - [Types of Binding](#types-of-binding)
   - [Unbinding](#unbinding)
   - [Deprovisioning](#deprovisioning)
+  - [Fetching a Service Instance](#fetching-a-service-instance)
+  - [Fetching a Service Binding](#fetching-a-service-binding)
   - [Broker Errors](#broker-errors)
   - [Orphans](#orphans)
 
@@ -196,6 +198,8 @@ A web-friendly display name is camel-cased with spaces and punctuation supported
 | tags | array-of-strings | Tags provide a flexible mechanism to expose a classification, attribute, or base technology of a service, enabling equivalent services to be swapped out without changes to dependent logic in applications, buildpacks, or other services. E.g. mysql, relational, redis, key-value, caching, messaging, amqp. |
 | requires | array-of-strings | A list of permissions that the user would have to give the service, if they provision it. The only permissions currently supported are `syslog_drain`, `route_forwarding` and `volume_mount`. |
 | bindable* | boolean | Specifies whether service instances of the service can be bound to applications. This specifies the default for all plans of this service. Plans can override this field (see [Plan Object](#plan-object)). |
+| instance_retrievable | boolean | Specifies whether the [Fetching a Service Instance](#fetching-a-service-instance) endpoint is supported for all plans. |
+| binding_retrievable | boolean | Specifies whether the [Fetching a Service Binding](#fetching-a-service-binding) endpoint is supported for all plans. |
 | metadata | JSON object | An opaque object of metadata for a service offering. Controller treats this as a blob. Note that there are [conventions](profile.md#service-metadata) in existing brokers and controllers for fields that aid in the display of catalog data. |
 | [dashboard_client](#dashboard-client-object) | object | Contains the data necessary to activate the Dashboard SSO feature for this service. |
 | plan_updateable | boolean | Whether the service supports upgrade/downgrade for some plans. Please note that the misspelling of the attribute `plan_updatable` to `plan_updateable` was done by mistake. We have opted to keep that misspelling instead of fixing it and thus breaking backward compatibility. Defaults to false. |
@@ -242,6 +246,8 @@ how platforms might expose these values to their users.
     "tags": ["no-sql", "relational"],
     "requires": ["route_forwarding"],
     "bindable": true,
+    "instance_retrievable": true,
+    "binding_retrievable" true,
     "metadata": {
       "provider": {
         "name": "The name"
@@ -961,6 +967,113 @@ For success responses, the following fields are supported. Others will be ignore
 ```
 {
   "operation": "task_10"
+}
+```
+
+
+## Fetching a Service Instance
+
+If `"instance_retrievable" :true` is declared for a service in the [Catalog](#catalog-management) endpoint, brokers MUST support this endpoint for all plans of the service.
+
+### Request
+
+##### Route
+`GET /v2/service_instances/:instance_id`
+
+`:instance_id` is the identifier of a previously provisioned instance.
+
+##### cURL
+```
+$ curl 'http://username:password@broker-url/v2/service_instances/:instance_id' -X GET -H "X-Broker-API-Version: 2.11"
+```
+
+### Response
+
+| Status Code | Description |
+| --- | --- |
+| 200 OK | The expected response body is below. |
+| 404 Not Found | MUST be returned if the service instance does not exist or if a provisioning operation is still in progress. The expected response body is `{}`. |
+
+Responses with any other status code will be interpreted as a failure.
+Brokers can include a user-facing message in the `description` field; for
+details see [Broker Errors](#broker-errors).
+
+##### Body
+
+For success responses, a broker MUST return the following fields. For error
+responses, see [Broker Errors](#broker-errors).
+
+| Response field | Type | Description |
+| --- | --- | --- |
+| dashboard_url | string | The URL of a web-based management user interface for the service instance; we refer to this as a service dashboard. The URL MUST contain enough information for the dashboard to identify the resource being accessed (`9189kdfsk0vfnku` in the example below). Note: a broker that wishes to return `dashboard_url` for a service instance MUST return it with the initial response to the provision request, even if the service is provisioned asynchronously. |
+| parameters | JSON object | Configuration options for the service instance. Brokers SHOULD ensure that the configuration parameters match the service instance update schema they provide to platforms via the [Catalog](#catalog-management) endpoint (this will enable platforms to offer additional features such as pre-populated form fields in UIs). If brokers cannot fetch all configuration parameters, they MUST not return any. |
+
+\* Fields with an asterisk are REQUIRED.
+
+```
+{
+  "dashboard_url": "http://example-dashboard.example.com/9189kdfsk0vfnku",
+  "parameters": {
+    "billing-account": "abcde12345"
+  }
+}
+```
+
+
+## Fetching a Service Binding
+
+If `"binding_retrievable" :true` is declared for a service in the [Catalog](#catalog-management) endpoint, brokers MUST support this endpoint for all plans of the service.
+
+### Request
+
+##### Route
+`GET /v2/service_instances/:instance_id/service_bindings/:binding_id`
+
+The `:instance_id` is the ID of a previously-provisioned service instance. The
+`:binding_id` is the ID of a previously provisioned binding for that instance.
+
+##### cURL
+```
+$ curl 'http://username:password@broker-url/v2/service_instances/:instance_id/service_bindings/:binding_id' -X GET -H "X-Broker-API-Version: 2.11"
+```
+
+### Response
+
+| Status Code | Description |
+| --- | --- |
+| 200 OK | The expected response body is below. |
+| 404 Not Found | MUST be returned if the service binding does not exist or if a binding operation is still in progress. The expected response body is `{}`. |
+
+Responses with any other status code will be interpreted as a failure database.
+Brokers can include a user-facing message in the `description` field; for
+details see [Broker Errors](#broker-errors).
+
+##### Body
+
+For success responses, the following fields are supported. Others will be
+ignored. For error responses, see [Broker Errors](#broker-errors).
+
+| Response Field | Type | Description |
+| --- | --- | --- |
+| credentials | object | A free-form hash of credentials that can be used by applications or users to access the service. |
+| syslog_drain_url | string | A URL to which logs MUST be streamed. `"requires":["syslog_drain"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the platform MUST consider the response invalid. |
+| route_service_url | string | A URL to which the platform MUST proxy requests for the address sent with `bind_resource.route` in the request body. `"requires":["route_forwarding"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the platform can consider the response invalid. |
+| volume_mounts | array-of-objects | An array of configuration for mounting volumes. `"requires":["volume_mount"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the platform can consider the response invalid. |
+| parameters | JSON object | Configuration options for the service instance. Brokers SHOULD ensure that the configuration parameters match the service binding schema they provide to platforms via the [Catalog](#catalog-management) endpoint (this will enable platforms to offer additional features such as pre-populated form fields in UIs). If brokers cannot fetch all configuration parameters, they MUST not return any. |
+
+```
+{
+  "credentials": {
+    "uri": "mysql://mysqluser:pass@mysqlhost:3306/dbname",
+    "username": "mysqluser",
+    "password": "pass",
+    "host": "mysqlhost",
+    "port": 3306,
+    "database": "dbname"
+  },
+  "parameters": {
+    "billing-account": "abcde12345"
+  }
 }
 ```
 
