@@ -11,7 +11,7 @@
   - [URL Properties](#url-properties)
   - [Originating Identity](#originating-identity)
   - [Catalog Management](#catalog-management)
-    - [Adding a Service Broker to the Platform](#adding-a-service-broker-to-the-platform)
+    - [Adding a Service Broker to the Platform](#adding-a-service-broker-to-the-Platform)
   - [Synchronous and Asynchronous Operations](#synchronous-and-asynchronous-operations)
     - [Synchronous Operations](#synchronous-operations)
     - [Asynchronous Operations](#asynchronous-operations)
@@ -24,6 +24,8 @@
     - [Types of Binding](#types-of-binding)
   - [Unbinding](#unbinding)
   - [Deprovisioning](#deprovisioning)
+  - [Fetching a Service Instance](#fetching-a-service-instance)
+  - [Fetching a Service Binding](#fetching-a-service-binding)
   - [Service Broker Errors](#service-broker-errors)
   - [Orphans](#orphans)
 
@@ -219,9 +221,9 @@ X-Broker-API-Originating-Identity: Platform value
 
 `Platform` MUST be a non-empty string indicating the Platform from which
 the request is being sent. The specific value SHOULD match the values
-defined in the [profile](profile.md) document for the `context.platform`
+defined in the [profile](profile.md) document for the `context.Platform`
 property. When `context` is sent as part of a message, this value MUST
-be the same as the `context.platform` value.
+be the same as the `context.Platform` value.
 
 `value` MUST be a Base64 encoded string. The string MUST be a serialized
 JSON object. The specific properties will be Platform specific - see
@@ -327,6 +329,8 @@ users when they have to type it as an argument on the command line.
 | tags | array-of-strings | Tags provide a flexible mechanism to expose a classification, attribute, or base technology of a service, enabling equivalent services to be swapped out without changes to dependent logic in applications, buildpacks, or other services. E.g. mysql, relational, redis, key-value, caching, messaging, amqp. |
 | requires | array-of-strings | A list of permissions that the user would have to give the service, if they provision it. The only permissions currently supported are `syslog_drain`, `route_forwarding` and `volume_mount`. |
 | bindable* | boolean | Specifies whether Service Instances of the service can be bound to applications. This specifies the default for all plans of this service. Plans can override this field (see [Plan Object](#plan-object)). |
+| instance_retrievable | boolean | Specifies whether the [Fetching a Service Instance](#fetching-a-service-instance) endpoint is supported for all plans. |
+| binding_retrievable | boolean | Specifies whether the [Fetching a Service Binding](#fetching-a-service-binding) endpoint is supported for all plans. |
 | metadata | object | An opaque object of metadata for a Service Offering. Controller treats this as a blob. Note that there are [conventions](profile.md#service-metadata) in existing Service Brokers and controllers for fields that aid in the display of catalog data. |
 | [dashboard_client](#dashboard-client-object) | object | Contains the data necessary to activate the Dashboard SSO feature for this service. |
 | plan_updateable | boolean | Whether the service supports upgrade/downgrade for some plans. Please note that the misspelling of the attribute `plan_updatable` as `plan_updateable` was done by mistake. We have opted to keep that misspelling instead of fixing it and thus breaking backward compatibility. Defaults to false. |
@@ -413,6 +417,8 @@ schema being used.
     "tags": ["no-sql", "relational"],
     "requires": ["route_forwarding"],
     "bindable": true,
+    "instance_retrievable": true,
+    "binding_retrievable" true,
     "metadata": {
       "provider": {
         "name": "The name"
@@ -777,7 +783,7 @@ The following HTTP Headers are defined for this operation:
   "service_id": "service-id-here",
   "plan_id": "plan-id-here",
   "context": {
-    "platform": "cloudfoundry",
+    "Platform": "cloudfoundry",
     "some_field": "some-contextual-data"
   },
   "organization_guid": "org-guid-here",
@@ -795,7 +801,7 @@ $ curl http://username:password@service-broker-url/v2/service_instances/:instanc
   "service_id": "service-id-here",
   "plan_id": "plan-id-here",
   "context": {
-    "platform": "cloudfoundry",
+    "Platform": "cloudfoundry",
     "some_field": "some-contextual-data"
   },
   "organization_guid": "org-guid-here",
@@ -910,7 +916,7 @@ The following HTTP Headers are defined for this operation:
 ```
 {
   "context": {
-    "platform": "cloudfoundry",
+    "Platform": "cloudfoundry",
     "some_field": "some-contextual-data"
   },
   "service_id": "service-id-here",
@@ -932,7 +938,7 @@ The following HTTP Headers are defined for this operation:
 ```
 $ curl http://username:password@service-broker-url/v2/service_instances/:instance_id?accepts_incomplete=true -d '{
   "context": {
-    "platform": "cloudfoundry",
+    "Platform": "cloudfoundry",
     "some_field": "some-contextual-data"
   },
   "service_id": "service-id-here",
@@ -1115,7 +1121,7 @@ binding requests.
 ```
 {
   "context": {
-    "platform": "cloudfoundry",
+    "Platform": "cloudfoundry",
     "some_field": "some-contextual-data"
   },
   "service_id": "service-id-here",
@@ -1135,7 +1141,7 @@ binding requests.
 ```
 $ curl http://username:password@service-broker-url/v2/service_instances/:instance_id/service_bindings/:binding_id -d '{
   "context": {
-    "platform": "cloudfoundry",
+    "Platform": "cloudfoundry",
     "some_field": "some-contextual-data"
   },
   "service_id": "service-id-here",
@@ -1395,6 +1401,113 @@ Errors](#service-broker-errors).
 ```
 {
   "operation": "task_10"
+}
+```
+
+## Fetching a Service Instance
+
+If `"instance_retrievable" :true` is declared for a service in the [Catalog](#catalog-management) endpoint, brokers MUST support this endpoint for all plans of the service.
+
+### Request
+
+##### Route
+`GET /v2/service_instances/:instance_id`
+
+`:instance_id` is the identifier of a previously provisioned instance.
+
+##### cURL
+```
+$ curl 'http://username:password@broker-url/v2/service_instances/:instance_id' -X GET -H "X-Broker-API-Version: 2.11"
+```
+
+### Response
+
+| Status Code | Description |
+| --- | --- |
+| 200 OK | The expected response body is below. |
+| 404 Not Found | MUST be returned if the Service Instance does not exist or if a provisioning operation is still in progress. The expected response body is `{}`. |
+
+Responses with any other status code will be interpreted as a failure.
+Brokers can include a user-facing message in the `description` field; for
+details see [Broker Errors](#service-broker-errors).
+
+##### Body
+
+For success responses, a broker MUST return the following fields. For error
+responses, see [Broker Errors](#service-broker-errors).
+
+| Response field | Type | Description |
+| --- | --- | --- |
+| service_id | string | The ID of the service from the catalog that is associated with the Service Instance. |
+| plan_id | string | The ID of the plan from the catalog that is associated with the Service Instance. |
+| dashboard_url | string | The URL of a web-based management user interface for the Service Instance; we refer to this as a service dashboard. The URL MUST contain enough information for the dashboard to identify the resource being accessed (`9189kdfsk0vfnku` in the example below). Note: a broker that wishes to return `dashboard_url` for a Service Instance MUST return it with the initial response to the provision request, even if the service is provisioned asynchronously. |
+| parameters | JSON object | Configuration options for the Service Instance. Service brokers SHOULD ensure that the configuration parameters match the Service Instance update schema they provide to Platforms via the [Catalog](#catalog-management) endpoint (this will enable Platforms to offer additional features such as pre-populated form fields in UIs). If brokers cannot fetch all configuration parameters, they MUST NOT return any. |
+
+\* Fields with an asterisk are REQUIRED.
+
+```
+{
+  "dashboard_url": "http://example-dashboard.example.com/9189kdfsk0vfnku",
+  "parameters": {
+    "billing-account": "abcde12345"
+  }
+}
+```
+
+## Fetching a Service Binding
+
+If `"binding_retrievable" :true` is declared for a service in the [Catalog](#catalog-management) endpoint, brokers MUST support this endpoint for all plans of the service.
+
+### Request
+
+##### Route
+`GET /v2/service_instances/:instance_id/service_bindings/:binding_id`
+
+The `:instance_id` is the ID of a previously-provisioned Service Instance. The
+`:binding_id` is the ID of a previously provisioned binding for that instance.
+
+##### cURL
+```
+$ curl 'http://username:password@broker-url/v2/service_instances/:instance_id/service_bindings/:binding_id' -X GET -H "X-Broker-API-Version: 2.11"
+```
+
+### Response
+
+| Status Code | Description |
+| --- | --- |
+| 200 OK | The expected response body is below. |
+| 404 Not Found | MUST be returned if the Service Binding does not exist or if a binding operation is still in progress. The expected response body is `{}`. |
+
+Responses with any other status code will be interpreted as a failure database.
+Brokers can include a user-facing message in the `description` field; for
+details see [Broker Errors](#service-broker-errors).
+
+##### Body
+
+For success responses, the following fields are supported. Others will be
+ignored. For error responses, see [Broker Errors](#service-broker-errors).
+
+| Response Field | Type | Description |
+| --- | --- | --- |
+| credentials | object | A free-form hash of credentials that can be used by applications or users to access the service. |
+| syslog_drain_url | string | A URL to which logs MUST be streamed. `"requires":["syslog_drain"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the Platform MUST consider the response invalid. |
+| route_service_url | string | A URL to which the Platform MUST proxy requests for the address sent with `bind_resource.route` in the request body. `"requires":["route_forwarding"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the Platform can consider the response invalid. |
+| volume_mounts | array-of-objects | An array of configuration for mounting volumes. `"requires":["volume_mount"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the Platform can consider the response invalid. |
+| parameters | JSON object | Configuration options for the Service Instance. Service brokers SHOULD ensure that the configuration parameters match the Service Binding schema they provide to Platforms via the [Catalog](#catalog-management) endpoint (this will enable Platforms to offer additional features such as pre-populated form fields in UIs). If Service Brokers cannot fetch all configuration parameters, they MUST NOT return any. |
+
+```
+{
+  "credentials": {
+    "uri": "mysql://mysqluser:pass@mysqlhost:3306/dbname",
+    "username": "mysqluser",
+    "password": "pass",
+    "host": "mysqlhost",
+    "port": 3306,
+    "database": "dbname"
+  },
+  "parameters": {
+    "billing-account": "abcde12345"
+  }
 }
 ```
 
