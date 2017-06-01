@@ -147,9 +147,18 @@ A web-friendly display name is camel-cased with spaces and punctuation supported
 | metadata | JSON object | An opaque object of metadata for a service plan. Controller treats this as a blob. Note that there are [conventions](https://docs.cloudfoundry.org/services/catalog-metadata.html) in existing brokers and controllers for fields that aid in the display of catalog data. |
 | free | boolean | When false, instances of this plan have a cost. The default is true. |
 | bindable | boolean | Specifies whether instances of the service plan can be bound to applications. This field is OPTIONAL. If specified, this takes precedence over the `bindable` attribute of the service. If not specified, the default is derived from the service. |
+| [schemas](#schemas-object) | object | Schema definitions for service instances and bindings for the plan. |
 
 
 \* Fields with an asterisk are REQUIRED.
+
+##### Schemas Object
+
+| Response field | Type | Description |
+| --- | --- | --- |
+| service_instance | JSON schema object | The schema definition for a service instance. Schema definitions MUST be valid [JSON Schema draft v4](http://json-schema.org/). Broker authors SHOULD explicitly mention the JSON schema draft 4 version, as this will prevent breaking changes when in the future the OSB spec starts supporting future versions of JSON schema with low readability impact. Input parameters that can be used to create a service instance can be configured using a top-level `parameters` object. A service that does not support any input parameters for service instances SHOULD provide the following schema: `{ "$schema": "http://json-schema.org/draft-04/schema#", "additionalProperties": false }`. |
+| service_binding | JSON schema object | The schema definition for a service binding. Schema definitions MUST be valid [JSON Schema draft v4](http://json-schema.org/). Broker authors SHOULD explicitly mention the JSON schema draft 4 version, as this will prevent breaking changes when in the future the OSB spec starts supporting future versions of JSON schema with low readability impact. Input parameters that can be used to create a service binding can be configured using a top-level `parameters` object. A service that does not support any input parameters for service bindings SHOULD provide the following schema: `{ "$schema": "http://json-schema.org/draft-04/schema#", "additionalProperties": false }`. |
+
 
 ```
 {
@@ -202,6 +211,41 @@ A web-friendly display name is camel-cased with spaces and punctuation supported
           "5 TB storage",
           "40 concurrent connections"
         ]
+      },
+      "schemas": {
+        "service_instance": {
+          "$schema": "http://json-schema.org/draft-04/schema#",
+          "type": "object",
+          "properties": {
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "billing-account": {
+                  "description": "Billing account number used to charge use of shared fake server.",
+                  "type": "string",
+                  "creatable": true,
+                  "updatable": true
+                }
+              }
+            }
+          }
+        },
+        "service_binding": {
+          "$schema": "http://json-schema.org/draft-04/schema#",
+          "type": "object",
+          "properties": {
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "billing-account": {
+                  "description": "Billing account number used to charge use of shared fake server.",
+                  "type": "string",
+                  "creatable": true
+                }
+              }
+            }
+          }
+        }
       }
     }, {
       "name": "fake-plan-2",
@@ -356,7 +400,7 @@ The `:instance_id` of a service instance is provided by the platform. This ID wi
 | plan_id* | string | The ID of the plan (from the catalog) for which the service instance has been requested. MUST be unique to a service. |
 | organization_guid* | string | The platform GUID for the organization under which the service is to be provisioned. Although most brokers will not use this field, it might be helpful for executing operations on a user's behalf. |
 | space_guid* | string | The identifier for the project space within the platform organization. Although most brokers will not use this field, it might be helpful for executing operations on a user's behalf. |
-| parameters | JSON object | Configuration options for the service instance. Controller treats this as a blob. Note that there are [conventions](https://docs.cloudfoundry.org/services/catalog-metadata.html) in existing brokers and controllers for fields that aid in the display of catalog data. Brokers SHOULD ensure that the client has provided valid configuration parameters and values for the operation. |
+| parameters | JSON object | Configuration options for the service instance. Brokers SHOULD ensure that the client has provided valid configuration parameters and values for the operation. |
 
 \* Fields with an asterisk are REQUIRED.
 
@@ -445,7 +489,7 @@ Not all permutations of plan changes are expected to be supported. For example, 
 | --- | --- | --- |
 | service_id* | string | The ID of the service (from the catalog). MUST be globally unique. |
 | plan_id | string | The ID of the plan (from the catalog) for which the service instance has been requested. MUST be unique to a service. |
-| parameters | JSON object | Configuration options for the service instance. An opaque object, controller treats this as a blob. Brokers SHOULD ensure that the client has provided valid configuration parameters and values for the operation. |
+| parameters | JSON object | Configuration options for the service instance. Brokers SHOULD ensure that the client has provided valid configuration parameters and values for the operation. |
 | previous_values | object | Information about the instance prior to the update. |
 | previous\_values.service_id | string | ID of the service for the instance. |
 | previous\_values.plan_id | string | ID of the plan prior to the update. |
@@ -566,7 +610,7 @@ the resource it creates.
 | plan_id* | string | ID of the plan from the catalog. |
 | app_guid | string | Deprecated in favor of `bind_resource.app_guid`. GUID of an application associated with the binding to be created. |
 | bind_resource | JSON object | A JSON object that contains data for platform resources associated with the binding to be created. Current valid values include `app_guid` for [credentials](#types-of-binding) and `route` for [route services](#route-services). |
-| parameters | JSON object | Configuration options for the service binding. An opaque object, controller treats this as a blob. Brokers SHOULD ensure that the client has provided valid configuration parameters and values for the operation. |
+| parameters | JSON object | Configuration options for the service binding. Brokers SHOULD ensure that the client has provided valid configuration parameters and values for the operation. |
 
 \* Fields with an asterisk are REQUIRED.
 
