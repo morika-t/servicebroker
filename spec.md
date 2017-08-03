@@ -20,6 +20,7 @@
   - [Updating a Service Instance](#updating-a-service-instance)
   - [Binding](#binding)
     - [Types of Binding](#types-of-binding)
+  - [Updating a Service Binding](#updating-a-service-binding)
   - [Unbinding](#unbinding)
   - [Deprovisioning](#deprovisioning)
   - [Fetching a Service Instance](#fetching-a-service-instance)
@@ -925,6 +926,125 @@ Currently only shared devices are supported; a distributed file system which can
 | mount_config | object | Configuration object to be passed to the driver when the volume is mounted. |
 
 \* Fields with an asterisk are REQUIRED.
+
+```
+{
+  "credentials": {
+    "uri": "mysql://mysqluser:pass@mysqlhost:3306/dbname",
+    "username": "mysqluser",
+    "password": "pass",
+    "host": "mysqlhost",
+    "port": 3306,
+    "database": "dbname"
+  }
+}
+```
+
+```
+{
+  "volume_mounts": [{
+    "driver": "cephdriver",
+    "container_dir": "/data/images",
+    "mode": "r",
+    "device_type": "shared",
+    "device": {
+      "volume_id": "bc2c1eab-05b9-482d-b0cf-750ee07de311",
+      "mount_config": {
+        "key": "value"
+      }
+    }
+  }]
+}
+```
+
+```
+{
+  "operation": "task_10"
+}
+```
+
+## Updating a Service Binding
+
+By implementing this endpoint, service broker authors can enable users to modify
+the parameters (configuration options) of an existing service binding.
+
+If a particular binding change is not supported, the broker SHOULD return a
+meaningful error message in response.
+
+### Request
+
+##### Route
+`PATCH /v2/service_instances/:instance_id/service_bindings/:binding_id`
+
+The `:instance_id` is the ID of a previously-provisioned service instance. The
+`:binding_id` is the ID of a previously-provisioned service binding.
+
+#### Parameters
+| Parameter name | Type | Description |
+| --- | --- | --- |
+| accepts_incomplete | boolean | A value of true indicates that the marketplace and its clients support asynchronous broker operations. If this parameter is not included in the request, and the broker can only perform an update binding operation asynchronously, the broker MUST reject the request with a `422 Unprocessable Entity` as described below. |
+
+##### Body
+
+| Request Field | Type | Description |
+| --- | --- | --- |
+| service_id* | string | ID of the service from the catalog. |
+| plan_id* | string | ID of the plan from the catalog. |
+| bind_resource | JSON object | A JSON object that contains data for platform resources associated with the binding to be created. Current valid values include `app_guid` for [credentials](#types-of-binding) and `route` for [route services](#route-services). |
+| parameters | JSON object | Configuration options for the service binding. Brokers SHOULD ensure that the client has provided valid configuration parameters and values for the operation. |
+
+\* Fields with an asterisk are REQUIRED.
+
+```
+{
+  "service_id": "service-guid-here",
+  "plan_id": "plan-guid-here",
+  "bind_resource": {
+    "app_guid": "app-guid-here"
+  },
+  "parameters": {
+    "parameter1-name-here": 1,
+    "parameter2-name-here": "parameter2-value-here"
+  }
+}
+```
+
+##### cURL
+```
+$ curl http://username:password@broker-url/v2/service_instances/:instance_id/service_bindings/:binding_id?accepts_incomplete=true -d '{
+  "service_id": "service-guid-here",
+  "plan_id": "plan-guid-here",
+  "bind_resource": {
+    "app_guid": "app-guid-here"
+  },
+  "parameters": {
+    "parameter1-name-here": 1,
+    "parameter2-name-here": "parameter2-value-here"
+  }
+}' -X PATCH
+```
+
+### Response
+
+| Status Code | Description |
+| --- | --- |
+| 200 OK | The requested changes have been applied. The expected response body is `{}`. |
+| 202 Accepted | MUST be returned if the service binding update is in progress. This triggers the platform marketplace to poll the [Polling Last Operation for Service Bindings](#polling-last-operation-for-service-bindings) endpoint for operation status. Note that a re-sent `PATCH` request MUST return a `202 Accepted`, not a `200 OK`, if the service binding is not yet fully updated. |
+| 422 Unprocessable entity | MUST be returned if the requested change is not supported or if the request cannot currently be fulfilled due to the state of the instance or binding (e.g. instance utilization is over the quota of the requested plan). Brokers SHOULD include a user-facing message in the body; for details see [Broker Errors](#broker-errors). |
+
+Responses with any other status code will be interpreted as a failure. Brokers can include a user-facing message in the `description` field; for details see [Broker Errors](#broker-errors).
+
+##### Body
+
+For success responses, the following fields are supported. Others will be ignored. For error responses, see [Broker Errors](#broker-errors).
+
+| Response Field | Type | Description |
+| --- | --- | --- |
+| credentials | object | A free-form hash of credentials that can be used by applications or users to access the service. |
+| syslog_drain_url | string | A URL to which logs MUST be streamed. `"requires":["syslog_drain"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the platform MUST consider the response invalid. |
+| route_service_url | string | A URL to which the platform MUST proxy requests for the address sent with `bind_resource.route` in the request body. `"requires":["route_forwarding"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the platform can consider the response invalid. |
+| volume_mounts | array-of-objects | An array of configuration for mounting volumes. `"requires":["volume_mount"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the platform can consider the response invalid. |
+| operation | string | For asynchronous responses, service brokers MAY return an identifier representing the operation. The value of this field MUST be provided by the platform with requests to the [Polling Last Operation for Service Bindings](#polling-last-operation-for-service-bindings) endpoint in a URL encoded query parameter. If present, MUST be a non-empty string. |
 
 ```
 {
