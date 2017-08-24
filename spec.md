@@ -13,8 +13,9 @@
   - [Synchronous and Asynchronous Operations](#synchronous-and-asynchronous-operations)
     - [Synchronous Operations](#synchronous-operations)
     - [Asynchronous Operations](#asynchronous-operations)
-  - [Polling Last Operation](#polling-last-operation)
-    - [Polling Interval and Duration](#polling-interval-and-duration)
+  - [Polling Last Operation for Service Instances](#polling-last-operation-for-service-instances)
+  - [Polling Last Operation for Service Bindings](#polling-last-operation-for-service-bindings)
+  - [Polling Interval and Duration](#polling-interval-and-duration)
   - [Provisioning](#provisioning)
   - [Updating a Service Instance](#updating-a-service-instance)
   - [Binding](#binding)
@@ -374,11 +375,21 @@ Sample response:
 }
 ```
 
-## Polling Last Operation
+## Polling Last Operation for Service Instances
 
-When a broker returns status code `202 Accepted` for [Provision](#provisioning), [Update](#updating-a-service-instance), or [Deprovision](#deprovisioning), the platform will begin polling the `/v2/service_instances/:instance_id/last_operation` endpoint to obtain the state of the last requested operation. The broker response MUST contain the field `state` and MAY contain the field `description`.
+When a broker returns status code `202 Accepted` for [Provision](#provisioning),
+[Update](#updating-a-service-instance), or [Deprovision](#deprovisioning), the
+platform will begin polling the
+`/v2/service_instances/:instance_id/last_operation` endpoint to obtain the state
+of the last requested operation. The broker response MUST contain the field
+`state` and MAY contain the field `description`.
 
-Valid values for `state` are `in progress`, `succeeded`, and `failed`. The platform will poll the `last_operation` endpoint as long as the broker returns `"state": "in progress"`. Returning `"state": "succeeded"` or `"state": "failed"` will cause the platform to cease polling. The value provided for `description` will be passed through to the platform API client and can be used to provide additional detail for users about the progress of the operation.
+Valid values for `state` are `in progress`, `succeeded`, and `failed`. The
+platform will poll the `last_operation` endpoint as long as the broker returns
+`"state": "in progress"`. Returning `"state": "succeeded"` or
+`"state": "failed"` will cause the platform to cease polling. The value provided
+for `description` will be passed through to the platform API client and can be
+used to provide additional detail for users about the progress of the operation.
 
 ### Request
 
@@ -395,7 +406,7 @@ The request provides these query string parameters as useful hints for brokers.
 | --- | --- | --- |
 | service_id | string | ID of the service from the catalog. If present, MUST be a non-empty string. |
 | plan_id | string | ID of the plan from the catalog. If present, MUST be a non-empty string. |
-| operation | string | A broker-provided identifier for the operation. When a value for `operation` is included with asynchronous responses for [Provision](#provisioning), [Update](#updating-a-service-instance), and [Deprovision](#deprovisioning) requests, the platform MUST provide the same value using this query parameter as a URL-encoded string. If present, MUST be a non-empty string. |
+| operation | string | A broker-provided identifier for the operation. When a value for `operation` is included with asynchronous responses for [Provision](#provisioning), [Update](#updating-a-service-instance), and [Deprovision](#deprovisioning) requests, the platform MUST provide the same value using this query parameter as a URL-encoded string. If brokers do not return this `operation` field, only one asynchronous operation MAY be supported at a time. If present, MUST be a non-empty string. |
 
 Note: Although the request query parameters `service_id` and `plan_id` are not mandatory, the platform SHOULD include them on all `last_operation` requests it makes to service brokers.
 
@@ -412,11 +423,14 @@ $ curl http://username:password@broker-url/v2/service_instances/:instance_id/las
 | 400 Bad Request | MUST be returned if the request is malformed or missing mandatory data. |
 | 410 Gone | Appropriate only for asynchronous delete operations. The platform MUST consider this response a success and remove the resource from its database. The expected response body is `{}`. Returning this while the platform is polling for create or update operations SHOULD be interpreted as an invalid response and the platform SHOULD continue polling. |
 
-Responses with any other status code SHOULD be interpreted as an error or invalid response. The platform SHOULD continue polling until the broker returns a valid response or the [maximum polling duration](#polling-interval-and-duration) is reached. Brokers MAY use the `description` field to expose user-facing error messages about the operation state; for more info see [Broker Errors](#broker-errors).
+Responses with any other status code SHOULD be interpreted as an error or
+invalid response. The platform SHOULD continue polling until the broker returns
+a valid response or the
+[maximum polling duration](#polling-interval-and-duration) is reached. Brokers
+MAY use the `description` field to expose user-facing error messages about the
+operation state; for more info see [Broker Errors](#broker-errors).
 
 #### Body
-
-All response bodies MUST be a valid JSON Object (`{}`). This is for future compatibility; it will be easier to add fields in the future if JSON is expected rather than to support the cases when a JSON body might or might not be returned.
 
 For success responses, the following fields are valid.
 
@@ -434,9 +448,88 @@ For success responses, the following fields are valid.
 }
 ```
 
-### Polling Interval and Duration
+## Polling Last Operation for Service Bindings
 
-The frequency and maximum duration of polling MAY vary by platform client. If a platform has a max polling duration and this limit is reached, the platform MUST cease polling and the operation state MUST be considered `failed`.
+When a broker returns status code `202 Accepted` for [Binding](#binding) or
+[Unbinding](#unbinding), the platform will begin polling the
+`/v2/service_instances/:instance_id/service_bindings/:binding_id/last_operation`
+endpoint to obtain the state of the last requested operation. The broker
+response MUST contain the field `state` and MAY contain the field `description`.
+
+Valid values for `state` are `in progress`, `succeeded`, and `failed`. The
+platform will poll the `last_operation` endpoint as long as the broker returns
+`"state": "in progress"`. Returning `"state": "succeeded"` or
+`"state": "failed"` will cause the platform to cease polling and, in the case of
+a [Binding](#binding) request, information on the service binding can then
+immediately be fetched using the
+[Fetching a Service Binding](#fetching-a-service-binding) endpoint. The value
+provided for `description` will be passed through to the platform API client and
+can be used to provide additional detail for users about the progress of the
+operation.
+
+### Request
+
+#### Route
+`GET /v2/service_instances/:instance_id/service_bindings/:binding_id/last_operation`
+
+`:instance_id` MUST be a globally unique non-empty string.
+`:binding_id` MUST be a globally unique non-empty string.
+
+#### Parameters
+
+The request provides these query string parameters as useful hints for brokers.
+
+| Query-String Field | Type | Description |
+| --- | --- | --- |
+| service_id | string | ID of the service from the catalog. If present, MUST be a non-empty string. |
+| plan_id | string | ID of the plan from the catalog. If present, MUST be a non-empty string. |
+| operation | string | A broker-provided identifier for the operation. When a value for `operation` is included with asynchronous responses for [Binding](#binding) and [Unbinding](#unbinding) requests, the platform MUST provide the same value using this query parameter as a URL-encoded string. If brokers do not return this `operation` field, only one asynchronous operation MAY be supported at a time. If present, MUST be a non-empty string. |
+
+Note: Although the request query parameters `service_id` and `plan_id` are not mandatory, the platform SHOULD include them on all `last_operation` requests it makes to service brokers.
+
+#### cURL
+```
+$ curl http://username:password@broker-url/v2/service_instances/:instance_id/service_bindings/:binding_id/last_operation
+```
+
+### Response
+
+| Status Code | Description |
+| --- | --- |
+| 200 OK | MUST be returned upon successful processing of this request. The expected response body is below. |
+| 400 Bad Request | MUST be returned if the request is malformed or missing mandatory data. |
+| 410 Gone | Appropriate only for asynchronous delete operations. The platform MUST consider this response a success and remove the resource from its database. The expected response body is `{}`. Returning this while the platform is polling for [Binding](#binding) operations SHOULD be interpreted as an invalid response and the platform SHOULD continue polling. |
+
+Responses with any other status code SHOULD be interpreted as an error or
+invalid response. The platform SHOULD continue polling until the broker returns
+a valid response or the
+[maximum polling duration](#polling-interval-and-duration) is reached. Brokers
+MAY use the `description` field to expose user-facing error messages about the
+operation state; for more info see [Broker Errors](#broker-errors).
+
+#### Body
+
+For success responses, the following fields are valid.
+
+| Response field | Type | Description |
+| --- | --- | --- |
+| state* | string | Valid values are `in progress`, `succeeded`, and `failed`. While `"state": "in progress"`, the platform SHOULD continue polling. A response with `"state": "succeeded"` or `"state": "failed"` MUST cause the platform to cease polling. |
+| description | string | A user-facing message displayed to the platform API client. Can be used to tell the user details about the status of the operation. If present, MUST be a non-empty string. |
+
+\* Fields with an asterisk are REQUIRED.
+
+```
+{
+  "state": "in progress",
+  "description": "Creating service (10% complete)."
+}
+```
+
+## Polling Interval and Duration
+
+The frequency and maximum duration of polling MAY vary by platform client. If a
+platform has a max polling duration and this limit is reached, the platform MUST
+cease polling and the operation state MUST be considered `failed`.
 
 ## Provisioning
 
@@ -509,7 +602,7 @@ $ curl http://username:password@broker-url/v2/service_instances/:instance_id?acc
 | --- | --- |
 | 200 OK | MUST be returned if the service instance already exists, is fully provisioned, and the requested parameters are identical to the existing service instance. The expected response body is below. |
 | 201 Created | MUST be returned if the service instance was provisioned as a result of this request. The expected response body is below. |
-| 202 Accepted | MUST be returned if the service instance provisioning is in progress. This triggers the platform marketplace to poll the [Service Instance Last Operation Endpoint](#polling-last-operation) for operation status. Note that a re-sent `PUT` request MUST return a `202 Accepted`, not a `200 OK`, if the service instance is not yet fully provisioned. |
+| 202 Accepted | MUST be returned if the service instance provisioning is in progress. This triggers the platform marketplace to poll the [Last Operation for Service Instances](#polling-last-operation-for-service-instances) endpoint for operation status. Note that a re-sent `PUT` request MUST return a `202 Accepted`, not a `200 OK`, if the service instance is not yet fully provisioned. |
 | 400 Bad Request | MUST be returned if the request is malformed or missing mandatory data. |
 | 409 Conflict | MUST be returned if a service instance with the same id already exists but with different attributes. The expected response body is `{}`, though the description field MAY be used to return a user-facing error message, as described in [Broker Errors](#broker-errors). |
 | 422 Unprocessable Entity | MUST be returned if the broker only supports asynchronous provisioning for the requested plan and the request did not include `?accepts_incomplete=true`. The expected response body is: `{ "error": "AsyncRequired", "description": "This service plan requires client support for asynchronous service operations." }`, as described below. |
@@ -525,7 +618,7 @@ For success responses, a broker MUST return the following fields. For error resp
 | Response field | Type | Description |
 | --- | --- | --- |
 | dashboard_url | string | The URL of a web-based management user interface for the service instance; we refer to this as a service dashboard. The URL MUST contain enough information for the dashboard to identify the resource being accessed (`9189kdfsk0vfnku` in the example below). Note: a broker that wishes to return `dashboard_url` for a service instance MUST return it with the initial response to the provision request, even if the service is provisioned asynchronously. If present, MUST be a non-empty string. |
-| operation | string | For asynchronous responses, service brokers MAY return an identifier representing the operation. The value of this field MUST be provided by the platform with requests to the [Last Operation](#polling-last-operation) endpoint in a URL encoded query parameter. If present, MUST be a non-empty string. |
+| operation | string | For asynchronous responses, service brokers MAY return an identifier representing the operation. The value of this field MUST be provided by the platform with requests to the [Polling Last Operation for Service Instances](#polling-last-operation-for-service-instances) endpoint in a URL encoded query parameter. If present, MUST be a non-empty string. |
 
 \* Fields with an asterisk are REQUIRED.
 
@@ -621,7 +714,7 @@ $ curl http://username:password@broker-url/v2/service_instances/:instance_id?acc
 | Status Code | Description |
 | --- | --- |
 | 200 OK | MUST be returned if the request's changes have been applied. The expected response body is `{}`. |
-| 202 Accepted | MUST be returned if the service instance update is in progress. This triggers the platform marketplace to poll the [Last Operation](#polling-last-operation) for operation status. Note that a re-sent `PATCH` request MUST return a `202 Accepted`, not a `200 OK`, if the requested update has not yet completed. |
+| 202 Accepted | MUST be returned if the service instance update is in progress. This triggers the platform marketplace to poll the [Polling Last Operation for Service Instances](#polling-last-operation-for-service-instances) endpoint for operation status. Note that a re-sent `PATCH` request MUST return a `202 Accepted`, not a `200 OK`, if the requested update has not yet completed. |
 | 400 Bad Request | MUST be returned if the request is malformed or missing mandatory data. |
 | 422 Unprocessable entity | MUST be returned if the requested change is not supported or if the request cannot currently be fulfilled due to the state of the service instance (e.g. service instance utilization is over the quota of the requested plan). Brokers SHOULD include a user-facing message in the body; for details see [Broker Errors](#broker-errors). Additionally, a `422 Unprocessable Entity` can also be returned if the broker only supports asynchronous update for the requested plan and the request did not include `?accepts_incomplete=true`; in this case the expected response body is: `{ "error": "AsyncRequired", "description": "This service plan requires client support for asynchronous service operations." }`. |
 
@@ -635,7 +728,7 @@ For success responses, a broker MUST return the following field. Others will be 
 
 | Response field | Type | Description |
 | --- | --- | --- |
-| operation | string | For asynchronous responses, service brokers MAY return an identifier representing the operation. The value of this field MUST be provided by the platform with requests to the [Last Operation](#polling-last-operation) endpoint in a URL encoded query parameter. If present, MUST be a non-empty string. |
+| operation | string | For asynchronous responses, service brokers MAY return an identifier representing the operation. The value of this field MUST be provided by the platform with requests to the [Polling Last Operation for Service Instances](#polling-last-operation-for-service-instances) endpoint in a URL encoded query parameter. If present, MUST be a non-empty string. |
 
 \* Fields with an asterisk are REQUIRED.
 
@@ -716,6 +809,11 @@ It MUST be the ID of a previously provisioned service instance.
 This ID will be used for future unbind requests, so the broker will use
 it to correlate the resource it creates.
 
+#### Parameters
+| Parameter name | Type | Description |
+| --- | --- | --- |
+| accepts_incomplete | boolean | A value of true indicates that the marketplace and its clients support asynchronous broker operations. If this parameter is not included in the request, and the broker can only perform a binding operation asynchronously, the broker MUST reject the request with a `422 Unprocessable Entity` as described below. |
+
 #### Body
 
 | Request Field | Type | Description |
@@ -767,7 +865,7 @@ binding requests.
 
 #### cURL
 ```
-$ curl http://username:password@broker-url/v2/service_instances/:instance_id/service_bindings/:binding_id -d '{
+$ curl http://username:password@broker-url/v2/service_instances/:instance_id/service_bindings/:binding_id?accepts_incomplete=true -d '{
   "service_id": "service-id-here",
   "plan_id": "plan-id-here",
   "bind_resource": {
@@ -786,6 +884,7 @@ $ curl http://username:password@broker-url/v2/service_instances/:instance_id/ser
 | --- | --- |
 | 200 OK | MUST be returned if the binding already exists and the requested parameters are identical to the existing binding. The expected response body is below. |
 | 201 Created | MUST be returned if the binding was created as a result of this request. The expected response body is below. |
+| 202 Accepted | MUST be returned if the binding is in progress. This triggers the platform marketplace to poll the [Polling Last Operation for Service Bindings](#polling-last-operation-for-service-bindings) endpoint for operation status. Note that a re-sent `PUT` request MUST return a `202 Accepted`, not a `200 OK`, if the binding is not yet fully created. |
 | 400 Bad Request | MUST be returned if the request is malformed or missing mandatory data. |
 | 409 Conflict | MUST be returned if a service binding with the same id, for the same service instance, already exists but with different parameters. The expected response body is `{}`, though the description field MAY be used to return a user-facing error message, as described in [Broker Errors](#broker-errors). |
 | 422 Unprocessable Entity | MUST be returned if the broker requires that `app_guid` be included in the request body. The expected response body is: `{ "error": "RequiresApp", "description": "This service supports generation of credentials through binding an application only." }`. |
@@ -804,6 +903,7 @@ For success responses, the following fields are supported. Others will be ignore
 | syslog_drain_url | string | A URL to which logs MUST be streamed. `"requires":["syslog_drain"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the platform MUST consider the response invalid. |
 | route_service_url | string | A URL to which the platform MUST proxy requests for the address sent with `bind_resource.route` in the request body. `"requires":["route_forwarding"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the platform can consider the response invalid. |
 | volume_mounts | array-of-objects | An array of configuration for remote storage devices to be mounted into an application container filesystem. `"requires":["volume_mount"]` MUST be declared in the [Catalog](#catalog-management) endpoint or the platform can consider the response invalid. |
+| operation | string | For asynchronous responses, service brokers MAY return an identifier representing the operation. The value of this field MUST be provided by the platform with requests to the [Polling Last Operation for Service Bindings](#polling-last-operation-for-service-bindings) endpoint in a URL encoded query parameter. If present, MUST be a non-empty string. |
 
 ##### Volume Mounts Object
 
@@ -856,6 +956,12 @@ Currently only shared devices are supported; a distributed file system which can
 }
 ```
 
+```
+{
+  "operation": "task_10"
+}
+```
+
 ## Unbinding
 
 Note: Brokers that do not provide any bindable services or plans do not need to implement this endpoint.
@@ -882,13 +988,14 @@ The request provides these query string parameters as useful hints for brokers.
 | --- | --- | --- |
 | service_id* | string | ID of the service from the catalog. MUST be a non-empty string. |
 | plan_id* | string | ID of the plan from the catalog. MUST be a non-empty string. |
+| accepts_incomplete | boolean | A value of true indicates that the marketplace and its clients support asynchronous broker operations. If this parameter is not included in the request, and the broker can only perform an unbinding operation asynchronously, the broker MUST reject the request with a `422 Unprocessable Entity` as described below. |
 
 \* Query parameters with an asterisk are REQUIRED.
 
 #### cURL
 ```
 $ curl 'http://username:password@broker-url/v2/service_instances/:instance_id/
-  service_bindings/:binding_id?service_id=service-id-here&plan_id=plan-id-here' -X DELETE -H "X-Broker-API-Version: 2.12"
+  service_bindings/:binding_id?service_id=service-id-here&plan_id=plan-id-here&accepts_incomplete=true' -X DELETE -H "X-Broker-API-Version: 2.12"
 ```
 
 ### Response
@@ -896,6 +1003,7 @@ $ curl 'http://username:password@broker-url/v2/service_instances/:instance_id/
 | Status Code | Description |
 | --- | --- |
 | 200 OK | MUST be returned if the binding was deleted as a result of this request. The expected response body is `{}`. |
+| 202 Accepted | MUST be returned if the unbinding is in progress. This triggers the marketplace to poll the [Polling Last Operation for Service Bindings](#polling-last-operation-for-service-bindings) endpoint for operation status. Note that a re-sent `DELETE` request MUST return a `202 Accepted`, not a `200 OK`, if the unbinding request has not completed yet. |
 | 400 Bad Request | MUST be returned if the request is malformed or missing mandatory data. |
 | 410 Gone | MUST be returned if the binding does not exist. The expected response body is `{}`. |
 
@@ -903,9 +1011,20 @@ Responses with any other status code will be interpreted as a failure and the bi
 
 #### Body
 
-All response bodies MUST be a valid JSON Object (`{}`). This is for future compatibility; it will be easier to add fields in the future if JSON is expected rather than to support the cases when a JSON body might or might not be returned.
+For success responses, the following fields are supported. Others will be
+ignored. For error responses, see [Broker Errors](#broker-errors).
 
-For a success response, the expected response body is `{}`.
+| Response field | Type | Description |
+| --- | --- | --- |
+| operation | string | For asynchronous responses, service brokers MAY return an identifier representing the operation. The value of this field MUST be provided by the platform with requests to the [Polling Last Operation for Service Bindings](#polling-last-operation-for-service-bindings) endpoint in a URL encoded query parameter. If present, MUST be a non-empty string. |
+
+\* Fields with an asterisk are REQUIRED.
+
+```
+{
+  "operation": "task_10"
+}
+```
 
 ## Deprovisioning
 
@@ -945,7 +1064,7 @@ $ curl 'http://username:password@broker-url/v2/service_instances/:instance_id?ac
 | Status Code | Description |
 | --- | --- |
 | 200 OK | MUST be returned if the service instance was deleted as a result of this request. The expected response body is `{}`. |
-| 202 Accepted | MUST be returned if the service instance deletion is in progress. This triggers the marketplace to poll the [Service Instance Last Operation Endpoint](#polling-last-operation) for operation status. Note that a re-sent `DELETE` request MUST return a `202 Accepted`, not a `200 OK`, if the delete request has not completed yet. |
+| 202 Accepted | MUST be returned if the service instance deletion is in progress. This triggers the marketplace to poll the [Polling Last Operation for Service Instances](#polling-last-operation-for-service-instances) endpoint for operation status. Note that a re-sent `DELETE` request MUST return a `202 Accepted`, not a `200 OK`, if the delete request has not completed yet. |
 | 400 Bad Request | MUST be returned if the request is malformed or missing mandatory data. |
 | 410 Gone | MUST be returned if the service instance does not exist. The expected response body is `{}`. |
 | 422 Unprocessable Entity | MUST be returned if the broker only supports asynchronous deprovisioning for the requested plan and the request did not include `?accepts_incomplete=true`. The expected response body is: `{ "error": "AsyncRequired", "description": "This service plan requires client support for asynchronous service operations." }`, as described below. |
@@ -960,7 +1079,7 @@ For success responses, the following fields are supported. Others will be ignore
 
 | Response field | Type | Description |
 | --- | --- | --- |
-| operation | string | For asynchronous responses, service brokers MAY return an identifier representing the operation. The value of this field MUST be provided by the platform with requests to the [Last Operation](#polling-last-operation) endpoint in a URL encoded query parameter. If present, MUST be a non-empty string. |
+| operation | string | For asynchronous responses, service brokers MAY return an identifier representing the operation. The value of this field MUST be provided by the platform with requests to the [Polling Last Operation for Service Instances](#polling-last-operation-for-service-instances) endpoint in a URL encoded query parameter. If present, MUST be a non-empty string. |
 
 \* Fields with an asterisk are REQUIRED.
 
@@ -973,7 +1092,13 @@ For success responses, the following fields are supported. Others will be ignore
 
 ## Fetching a Service Instance
 
-If `"instance_retrievable" :true` is declared for a service in the [Catalog](#catalog-management) endpoint, brokers MUST support this endpoint for all plans of the service.
+If `"instance_retrievable" :true` is declared for a service in the
+[Catalog](#catalog-management) endpoint, brokers MUST support this endpoint for
+all plans of the service and this endpoint MUST be available immediately after
+the
+[Polling Last Operation for Service Instances](#polling-last-operation-for-service-instances)
+endpoint returns `"state": "succeeded"` for a [Provisioning](#provisioning)
+operation.
 
 ### Request
 
@@ -1022,7 +1147,12 @@ responses, see [Broker Errors](#broker-errors).
 
 ## Fetching a Service Binding
 
-If `"binding_retrievable" :true` is declared for a service in the [Catalog](#catalog-management) endpoint, brokers MUST support this endpoint for all plans of the service.
+If `"binding_retrievable" :true` is declared for a service in the
+[Catalog](#catalog-management) endpoint, brokers MUST support this endpoint for
+all plans of the service and this endpoint MUST be available immediately after
+the
+[Polling Last Operation for Service Bindings](#polling-last-operation-for-service-bindings)
+endpoint returns `"state": "succeeded"` for a [Binding](#binding) operation.
 
 ### Request
 
