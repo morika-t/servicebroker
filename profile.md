@@ -384,4 +384,4 @@ specific behaviour.
 
 | Broker API Field | Type | Description |
 | --- | --- | --- |
-| metadata.shareable | string | Allows service instances to be shared across orgs and spaces. |
+| metadata.shareable | boolean | Allows service instances to be shared across orgs and spaces. |
